@@ -1,0 +1,26 @@
+# Tested on Python 3.13 (Windows). ML libraries are floor-pinned rather than
+# exact-pinned because wheel availability varies sharply by Python version.
+
+# --- Data acquisition ---
+requests>=2.32
+python-dotenv>=1.0
+tqdm>=4.67
+
+# --- Document extraction ---
+pymupdf>=1.25          # PDF text + structure
+beautifulsoup4>=4.12   # HTML / JATS XML parsing
+lxml>=5.3
+
+# --- Embeddings & reranking ---
+torch>=2.6
+sentence-transformers>=3.3
+
+# --- Vector DB & sparse retrieval ---
+chromadb>=0.5.23
+rank-bm25>=0.2.2
+
+# --- Generation ---
+google-genai>=1.0
+
+# --- Testing ---
+pytest>=8.3

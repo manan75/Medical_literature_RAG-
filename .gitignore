@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets
+.env
+
+# Data artifacts (raw corpus + derived artifacts are regenerable via scripts)
+data/raw/**/*.json
+data/raw/**/*.xml
+data/raw/**/*.pdf
+data/raw/**/*.html
+data/processed/*.json
+data/processed/*.jsonl
+data/chunks/*.json
+data/chunks/*.jsonl
+data/vectorstore/*
+!data/**/.gitkeep
+
+# Model caches
+.cache/
+models/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
