@@ -42,7 +42,8 @@ NCBI_TOOL = os.getenv("NCBI_TOOL", "medical-literature-rag")
 # ---- Chunking ----
 CHUNK_TARGET_TOKENS = 350   # approximate; see src/chunking for the word-based proxy
 CHUNK_OVERLAP_TOKENS = 60
-CHUNK_MIN_TOKENS = 40       # below this a chunk is merged into its neighbour
+CHUNK_MIN_TOKENS = 40       # below this a trailing chunk is merged into its neighbour
+CHUNK_NOISE_FLOOR = 10      # a lone chunk this short carries no retrievable meaning
 
 # ---- Retrieval ----
 COLLECTION_NAME = "medical_literature"

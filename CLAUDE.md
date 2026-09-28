@@ -139,10 +139,10 @@ Each phase has a goal, a step-by-step checklist, and an explicit "definition of 
 
 ### Phase 2 — Medical Text Chunking
 **Goal:** Processed text is split into retrieval-ready chunks without breaking clinical meaning.
-- [ ] Choose chunking strategy (fixed-size vs. semantic/section-aware) and justify
-- [ ] Preserve section context (e.g., "Dosage," "Contraindications," "Side Effects") as chunk metadata
-- [ ] Handle tables (e.g., dosage tables) as a special case if present
-- [ ] Tests verifying no chunk crosses a hard semantic boundary inappropriately
+- [x] Choose chunking strategy (fixed-size vs. semantic/section-aware) and justify
+- [x] Preserve section context (e.g., "Dosage," "Contraindications," "Side Effects") as chunk metadata
+- [x] Handle tables (e.g., dosage tables) as a special case if present
+- [x] Tests verifying no chunk crosses a hard semantic boundary inappropriately
 **Definition of done:** sample corpus chunked with metadata; spot-checked chunks make sense read in isolation.
 
 ### Phase 3 — Biomedical Embeddings

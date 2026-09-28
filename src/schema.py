@@ -77,7 +77,7 @@ class Chunk:
         """Human-readable source label used in grounded answers."""
         bits = [self.title]
         if self.section:
-            bits.append(f"\u00a7 {self.section}")
+            bits.append(f"[{self.section}]")
         if self.date:
             bits.append(f"({self.date})")
         return " ".join(bits)
