@@ -88,13 +88,14 @@ def parse_pmc_xml(xml: str) -> list[Document]:
     docs: list[Document] = []
 
     for art in soup.find_all("article"):
-        pmcid = ""
-        for aid in art.find_all("article-id"):
-            if aid.get("pub-id-type") == "pmc":
-                pmcid = aid.get_text(strip=True)
-                break
+        # NCBI labels the PMC id "pmcid" in current JATS output and "pmc" in older
+        # records; accept both, and fall back to the numeric "pmcaid".
+        ids = {aid.get("pub-id-type"): aid.get_text(strip=True)
+               for aid in art.find_all("article-id")}
+        pmcid = ids.get("pmcid") or ids.get("pmc") or ids.get("pmcaid") or ""
         if not pmcid:
             continue
+        pmcid = pmcid if pmcid.startswith("PMC") else f"PMC{pmcid}"
 
         title = _text(art.find("article-title"))
         journal = _text(art.find("journal-title"))
@@ -137,7 +138,7 @@ def parse_pmc_xml(xml: str) -> list[Document]:
             source="pmc",
             title=title,
             sections=sections,
-            url=f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmcid.lstrip('PMC')}/",
+            url=f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/",
             date=date,
             authors=authors,
             journal=journal,

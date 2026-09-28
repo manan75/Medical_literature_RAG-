@@ -147,25 +147,25 @@ Each phase has a goal, a step-by-step checklist, and an explicit "definition of 
 
 ### Phase 3 — Biomedical Embeddings
 **Goal:** Chunks are embedded with a model suited to medical text.
-- [ ] Implement embedding generation over chunked corpus
-- [ ] Benchmark chosen embedding model on a handful of hand-written medical queries (qualitative check)
-- [ ] Store embeddings with linkage back to source chunk + document metadata
+- [x] Implement embedding generation over chunked corpus
+- [x] Benchmark chosen embedding model on a handful of hand-written medical queries (qualitative check)
+- [x] Store embeddings with linkage back to source chunk + document metadata
 **Definition of done:** embeddings generated and persisted; a manual nearest-neighbor check returns sensible results.
 
 ### Phase 4 — Vector Database & Hybrid Retrieval
 **Goal:** Fast, relevant retrieval combining semantic + keyword signals.
-- [ ] Stand up vector DB and load embeddings
-- [ ] Implement semantic (dense) retrieval
-- [ ] Implement keyword/BM25 (sparse) retrieval
-- [ ] Combine into hybrid retrieval with a fusion strategy (e.g., reciprocal rank fusion)
-- [ ] Tests on a fixed query set with expected-relevant-doc checks
+- [x] Stand up vector DB and load embeddings
+- [x] Implement semantic (dense) retrieval
+- [x] Implement keyword/BM25 (sparse) retrieval
+- [x] Combine into hybrid retrieval with a fusion strategy (e.g., reciprocal rank fusion)
+- [x] Tests on a fixed query set with expected-relevant-doc checks
 **Definition of done:** given a test query set, hybrid retrieval outperforms either method alone on manual inspection.
 
 ### Phase 5 — Reranking
 **Goal:** Improve precision of top-k retrieved chunks before they reach the LLM.
-- [ ] Choose reranker (cross-encoder or LLM-based reranking)
-- [ ] Integrate reranking after hybrid retrieval, before generation
-- [ ] Evaluate top-k precision before/after reranking on test query set
+- [x] Choose reranker (cross-encoder or LLM-based reranking)
+- [x] Integrate reranking after hybrid retrieval, before generation
+- [x] Evaluate top-k precision before/after reranking on test query set
 **Definition of done:** measurable or clearly observable improvement in top-k relevance on the test set.
 
 ### Phase 6 — Grounded Generation (Core RAG Loop)

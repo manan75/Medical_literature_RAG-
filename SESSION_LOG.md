@@ -97,3 +97,135 @@ bottom. Template is defined in [CLAUDE.md §5](CLAUDE.md).
 
 **Next session should start with:**
 - Phase 2 — section-aware chunking (`src/chunking/`), over the ingested corpus.
+
+---
+
+## Session: 2026-09-28 (part 2 — same working session, continued)
+
+**Phase(s) worked on:** Phase 2 — Chunking · Phase 3 — Embeddings ·
+Phase 4 — Vector DB & Hybrid Retrieval · Phase 5 — Reranking
+
+**Goal for this session:**
+- Carry the pipeline from "documents on disk" to "ask a question, get relevant
+  cited chunks back"
+- Harvest the full corpus rather than the smoke-test subset
+- Get far enough that Phase 6 (generation) is the only thing standing between the
+  project and an end-to-end demo
+
+**What was discussed:**
+- Checked in on progress mid-session. Confirmed there is **no UI yet** — every
+  entry point is a CLI module. Per CLAUDE.md the UI/API belongs to Phase 10, but
+  for the evaluation demo it is worth pulling forward once Phase 6 works; a UI
+  over retrieval alone would just be a search box.
+
+**What was done:**
+- **Phase 2 — Chunking.** `src/chunking/splitter.py` and `pipeline.py`.
+  Section-aware packing, abbreviation-aware sentence splitting, whole-table
+  preservation, overlap, orphan-tail merging, noise floor. 16 tests.
+- **Phase 3 — Embeddings.** `src/embeddings/encoder.py`. Lazy model loading,
+  L2-normalised vectors, and *contextualised embedding input*: each chunk is
+  encoded as `"<title> | <section>\n<text>"` so the section heading lands inside
+  the vector. The stored chunk text is left undecorated, so citations stay clean.
+- **Phase 4 — Retrieval.** `src/retrieval/`: `types.py` (one shared result type),
+  `vector_store.py` (Chroma, cosine, full metadata round-trip), `sparse.py`
+  (BM25 over title+section+text, medical-aware tokenizer), `hybrid.py`
+  (reciprocal rank fusion), `build_index.py`, `search.py` (CLI with `--compare`,
+  `--rerank`, `--eval`).
+- **Phase 5 — Reranking.** `src/retrieval/rerank.py`. Cross-encoder over the
+  hybrid candidate list, with the pre-rerank score and rank preserved in
+  `components` so the effect stays inspectable. 7 tests.
+- **Full corpus harvested:** 20 FDA labels, 12 PubMed queries x 12 records,
+  3 PMC full-text queries.
+
+**Decisions made / deviations from plan:**
+- **RRF chosen over weighted score blending** for fusion. Cosine similarity is
+  bounded in [0,1] and BM25 is unbounded and corpus-dependent, so any weighted sum
+  needs normalisation constants that must be retuned whenever the corpus changes.
+  RRF fuses on rank alone, needs no tuning, and rewards agreement between the two
+  signals — which is itself evidence of relevance.
+- **Section heading is embedded, not just stored as metadata.** Two chunks can be
+  near-identical in wording under "Drug Interactions" and "Adverse Reactions"
+  while answering different questions; the heading has to be inside the vector to
+  separate them.
+- **BM25 index is rebuilt in memory rather than persisted.** It takes under a
+  second at this corpus size and can never go stale against `chunks.jsonl` the way
+  a pickled index can.
+- **Reranker is general-domain (MS MARCO), not biomedical.** It judges
+  query-chunk relevance, not clinical semantics; the biomedical signal is already
+  carried by the retrieval stage that produced the candidates. Revisit in Phase 9
+  if evaluation shows it is the bottleneck.
+- **Minimal BM25 stopword list.** Aggressive stopword removal would strip "no",
+  "not" and "without" — negation words that invert the clinical meaning of a
+  contraindication.
+
+**Bugs found and fixed (all found by running the thing, not by reading it):**
+1. **PMC full text silently yielded zero documents.** NCBI labels the identifier
+   `pub-id-type="pmcid"` in current JATS output; the parser only accepted the
+   legacy `"pmc"`. Every PMC article was being skipped without error. Now accepts
+   `pmcid` / `pmc` / `pmcaid`, and both forms are covered by tests. Fixing it added
+   9 full-text documents and 301 chunks.
+2. **openFDA returned combination products as single-drug labels.** A search for
+   "metformin" returned *Sitagliptin and Metformin Hydrochloride* — so the corpus
+   had no plain metformin label at all, and the top hit for "side effects of
+   metformin" was a combination product. Added `_specificity()` ranking (exact
+   generic name > salt form > other > combination) and re-harvested; all 20 labels
+   are now single-ingredient. This would also have broken Phase 7, where the whole
+   point is to reason about one drug at a time.
+3. **Sentence splitter ran two sentences together.** Rejoining on an abbreviation
+   alone broke `"Administer 5 mg i.v. every 8 h. Reduce the dose..."` — "h." is a
+   known abbreviation but did end that sentence. Now also requires the following
+   fragment to start lowercase or with a digit.
+4. **PDF heading detection collapsed every section into one.** `statistics.mode`
+   returns the *first* mode on a tie, so a page with as many heading lines as body
+   lines elected the heading size as the body size. Replaced with character-weighted
+   frequency: body text always dominates by volume even when it does not by line count.
+5. **FDA `effective_time` was left as `20240416`.** Now normalised to ISO `2024-04-16`.
+6. **Two test-isolation defects of my own:** `renumber()` was overwriting the rank
+   an assertion depended on, and a fixed Chroma collection name leaked vectors
+   between tests (chromadb reuses in-process clients). Both fixed in the tests.
+
+**Verification:**
+- Full harvest — **pass**. 20 FDA labels, 12 PubMed batches, 3 PMC batches.
+- `python -m src.ingestion.pipeline` — **pass**. 171 documents / 661 sections
+  (20 FDA, 142 PubMed, 9 PMC).
+- `python -m src.chunking.pipeline` — **pass**. 1,255 chunks, median 297 tokens,
+  200 distinct section headings preserved, 4 oversized chunks (intact tables).
+- `python -m src.retrieval.build_index --check` — **pass**. 1,255 vectors, 768-dim,
+  273s on CPU (4.6 chunks/s).
+- `python -m src.retrieval.search --eval --rerank` — **pass**, and this is the
+  Phase 4/5 definition of done. Representative results:
+  - *"metformin contraindications renal impairment"* → after reranking, #1 is the
+    metformin label's **Contraindications** section (hybrid had it at #2).
+  - *"Can aspirin interact with warfarin?"* → #1 is the warfarin label's **Drug
+    Interactions** section; reranking promoted 2 chunks from outside the top 3,
+    including a systematic review's Conclusions from rank #9.
+  - *"CYP3A4 inhibitors and simvastatin"* → all top 3 are simvastatin label
+    sections.
+  - *"What are the common side effects of metformin?"* → reranking put **Adverse
+    Reactions** above **Drug Interactions**, which is the correct preference for a
+    side-effects question.
+- Hybrid vs. single-method inspection — hybrid beats either alone. Dense alone
+  confused drug names (ranked metoprolol third for a metformin query); BM25 alone
+  was derailed by common words in verbose natural-language questions (ranked an
+  inositol paper first). Fusion plus reranking fixes both.
+- `python -m pytest` — **67 passed**.
+
+**Open issues / blockers:**
+- `GEMINI_API_KEY` is still unset. **This blocks Phase 6 entirely.** Get a free key
+  at https://aistudio.google.com/apikey and put it in `.env`. *(User action —
+  needed before the next session.)*
+- **No UI exists.** CLI only. Worth pulling a small Streamlit or FastAPI front-end
+  forward from Phase 10 once Phase 6 works, so the evaluation has something to look at.
+- BM25 is weak on verbose natural-language questions (it matches "common",
+  "effects" as content words). Reranking compensates, but Phase 9 should measure
+  this properly rather than relying on the fix being invisible.
+- Embedding the corpus takes ~4.5 minutes on CPU. Fine for rebuilds, but do not
+  plan to rebuild the index live during the evaluation demo.
+- The reranker is general-domain; revisit if Phase 9 evaluation shows it limiting.
+
+**Next session should start with:**
+- Phase 6 — grounded generation (`src/generation/`): prompt enforcing
+  "answer only from the provided context, cite sources", response assembly with an
+  explicit source list, a graceful "not found in corpus" path, and a confidence
+  indicator derived from retrieval score spread and source agreement. Requires
+  `GEMINI_API_KEY` to be set first.

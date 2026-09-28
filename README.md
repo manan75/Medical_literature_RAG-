@@ -61,6 +61,15 @@ python -m src.ingestion.pipeline
 # 3. Chunk into retrieval units → data/chunks/chunks.jsonl
 python -m src.chunking.pipeline
 
+# 4. Embed every chunk and load Chroma (~7 min on CPU for ~1300 chunks)
+python -m src.retrieval.build_index --check
+
+# 5. Query it
+python -m src.retrieval.search "What are the common side effects of metformin?"
+python -m src.retrieval.search "metformin contraindications" --compare   # dense vs BM25 vs hybrid
+python -m src.retrieval.search "warfarin aspirin interaction" --rerank   # before vs after reranking
+python -m src.retrieval.search --eval                                    # fixed probe set
+
 # Tests
 python -m pytest
 ```
@@ -79,4 +88,4 @@ datasets are used.
 
 ## Status
 
-See the roadmap in [CLAUDE.md §4](CLAUDE.md). Phases 0–4 complete.
+See the roadmap in [CLAUDE.md §4](CLAUDE.md). **Phases 0–5 complete** (ingestion → chunking → embeddings → hybrid retrieval → reranking). Phase 6 (grounded generation) is next and needs `GEMINI_API_KEY`.

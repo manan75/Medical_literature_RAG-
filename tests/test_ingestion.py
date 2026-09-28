@@ -129,6 +129,19 @@ PMC_XML = """<?xml version="1.0"?>
 """
 
 
+def test_pmc_accepts_current_pmcid_label():
+    """Live NCBI output labels the id 'pmcid'; older records use 'pmc'. Both must work."""
+    current = PMC_XML.replace('pub-id-type="pmc"', 'pub-id-type="pmcid"')
+    docs = pubmed_parser.parse_pmc_xml(current)
+    assert len(docs) == 1 and docs[0].doc_id == "pmc:PMC7654321"
+
+
+def test_pmc_bare_numeric_id_is_prefixed():
+    bare = PMC_XML.replace('pub-id-type="pmc">PMC7654321', 'pub-id-type="pmcaid">7654321')
+    docs = pubmed_parser.parse_pmc_xml(bare)
+    assert len(docs) == 1 and docs[0].doc_id == "pmc:PMC7654321"
+
+
 def test_pmc_extracts_abstract_and_leaf_sections_only():
     docs = pubmed_parser.parse_pmc_xml(PMC_XML)
     assert len(docs) == 1

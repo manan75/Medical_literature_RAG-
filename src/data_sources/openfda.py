@@ -34,20 +34,50 @@ LABEL_SECTIONS = [
 ]
 
 
+def _specificity(record: dict, drug: str) -> tuple[int, int]:
+    """Rank a candidate label by how specifically it is *about* `drug`.
+
+    A search for "metformin" matches combination products such as "SITAGLIPTIN AND
+    METFORMIN HYDROCHLORIDE" just as happily as the single-ingredient label, and
+    openFDA returns them in no particular order. A combination label is the wrong
+    evidence for both "side effects of metformin" and for drug-interaction lookups,
+    where the whole point is to reason about one drug at a time.
+
+    Sorts best-first: exact generic-name match, then fewest active ingredients,
+    then shortest name.
+    """
+    names = [n.lower() for n in record.get("openfda", {}).get("generic_name", [])]
+    target = drug.lower()
+
+    if any(n == target for n in names):
+        tier = 0                                   # exact match
+    elif any(n.startswith(target) for n in names):
+        tier = 1                                   # "metformin hydrochloride"
+    elif any(" and " in n for n in names):
+        tier = 3                                   # combination product
+    else:
+        tier = 2
+
+    shortest = min((len(n) for n in names), default=999)
+    return (tier, shortest)
+
+
 def fetch_label(drug: str, limit: int = 1) -> list[dict]:
-    """Fetch label record(s) for a drug by generic name, falling back to brand name."""
+    """Fetch the most drug-specific label available, by generic then brand name."""
     for field in ("openfda.generic_name", "openfda.brand_name"):
         try:
             resp = get(
                 LABEL_ENDPOINT,
-                params={"search": f'{field}:"{drug}"', "limit": limit},
+                # Over-fetch so there is something to choose between.
+                params={"search": f'{field}:"{drug}"', "limit": max(limit, 10)},
                 min_interval=0.3,
             )
         except RuntimeError:
             continue
         results = resp.json().get("results", [])
         if results:
-            return results
+            results.sort(key=lambda r: _specificity(r, drug))
+            return results[:limit]
     return []
 
 
