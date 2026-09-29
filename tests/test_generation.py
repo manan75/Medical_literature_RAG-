@@ -72,6 +72,7 @@ def test_exactly_one_llm_call_and_sources_match_prompt_numbers():
         (1, "Adverse Reactions", "https://x.test/fda:met"),
         (2, "Results", "https://x.test/pubmed:1")]
     assert [r.chunk_id for r in ans.chunks] == ["a", "b"]
+    assert [s.source_type for s in ans.sources] == ["FDA label", "FDA label"]
     assert ans.found
 
 

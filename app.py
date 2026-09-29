@@ -12,7 +12,7 @@ import streamlit as st
 
 from src import config
 from src.data_sources.corpus_spec import DRUGS
-from src.generation.answer import Answer, answer_question
+from src.generation.answer import SOURCE_TYPES, Answer, answer_question
 from src.generation.providers import GeminiProvider, LLMError
 from src.interactions.check import InteractionChecker
 
@@ -24,8 +24,10 @@ st.warning(
     "cited sources below and can be incomplete or wrong. Always consult a "
     "qualified healthcare professional.", icon="⚠️")
 st.title("Medical Literature RAG")
-st.caption("PubMed · PMC · FDA drug labels → hybrid retrieval (PubMedBERT + BM25, "
-           "RRF) → cross-encoder rerank → Gemini, answering only from cited passages.")
+st.caption("MedlinePlus · PubMed · PMC · FDA drug labels → hybrid retrieval "
+           "(PubMedBERT + BM25, RRF) → cross-encoder rerank → Gemini, answering only "
+           "from cited passages. Plain-language topic summaries: Source: MedlinePlus, "
+           "National Library of Medicine.")
 
 
 @st.cache_resource(show_spinner="Loading embedding model, reranker and index...")
@@ -49,6 +51,12 @@ def load_provider():
 
 
 BADGE = {"High": "green", "Medium": "orange", "Low": "red", "None": "gray"}
+TYPE_COLOR = {"MedlinePlus": "blue", "PubMed": "violet", "PMC": "violet",
+              "FDA label": "green"}
+
+
+def type_tag(source_type: str) -> str:
+    return f":{TYPE_COLOR.get(source_type, 'gray')}-badge[{source_type}]"
 
 
 def _md(text: str) -> str:
@@ -64,8 +72,9 @@ def render(ans: Answer) -> None:
     if ans.sources:
         st.markdown("**Sources**")
         st.markdown("\n".join(
-            f"{s.number}. [{_md(s.title)}]({s.url}) — *{s.section}*" if s.url
-            else f"{s.number}. {_md(s.title)} — *{s.section}*"
+            f"{s.number}. {type_tag(s.source_type)} [{_md(s.title)}]({s.url}) — "
+            f"*{s.section}*" if s.url
+            else f"{s.number}. {type_tag(s.source_type)} {_md(s.title)} — *{s.section}*"
             for s in ans.sources))
 
     if ans.chunks:
@@ -88,7 +97,8 @@ def render(ans: Answer) -> None:
                 st.markdown(f"**[{i}] {_md(r.chunk.title)}** — *{r.chunk.section}*  \n"
                             f"rerank score **{r.score:+.2f}**{pre}"
                             + (f" ({ranks})" if ranks else "")
-                            + f" · `{r.chunk.source}`")
+                            + " · " + type_tag(SOURCE_TYPES.get(r.chunk.source,
+                                                                r.chunk.source)))
                 st.text(r.chunk.text.strip())
                 st.divider()
 

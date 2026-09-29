@@ -60,6 +60,12 @@ class Source:
     section: str
     url: str
     citation: str
+    source_type: str = ""           # "MedlinePlus" | "PubMed" | "PMC" | "FDA label"
+
+
+# Display names for Chunk.source, so a reader can see what kind of evidence it is.
+SOURCE_TYPES = {"medlineplus": "MedlinePlus", "pubmed": "PubMed", "pmc": "PMC",
+                "fda_label": "FDA label"}
 
 
 @dataclass
@@ -129,7 +135,8 @@ def generate_answer(question: str, results: list[RetrievalResult],
                       chunks=results)
 
     sources = [Source(i, r.chunk.title, r.chunk.section, r.chunk.url,
-                      r.chunk.citation())
+                      r.chunk.citation(),
+                      SOURCE_TYPES.get(r.chunk.source, r.chunk.source))
                for i, r in enumerate(results, start=1)]
     level, why = confidence(results)
 
@@ -153,7 +160,8 @@ def format_answer(ans: Answer) -> str:
     lines = [ans.text, "", f"Confidence: {ans.confidence} -- {ans.confidence_reason}"]
     if ans.sources:
         lines += ["", "Sources:"]
-        lines += [f"  [{s.number}] {s.citation}" + (f"\n      {s.url}" if s.url else "")
+        lines += [f"  [{s.number}] ({s.source_type}) {s.citation}"
+                  + (f"\n      {s.url}" if s.url else "")
                   for s in ans.sources]
     lines += ["", "For information and education only -- not medical advice."]
     return "\n".join(lines)
