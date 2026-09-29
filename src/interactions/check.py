@@ -114,21 +114,25 @@ class InteractionChecker:
                     f"mechanism and consequences as stated in the sources.")
         label_chunks, findings = self._label_hits(a, b)
 
-        # Literature: any retrieved chunk that names both drugs.
+        # Literature: any retrieved chunk that names both drugs. Keeps its hybrid
+        # rank; label-scan chunks are tagged so the UI can say where each came from.
         retrieved = self.retriever.hybrid.search(f"{a} {b} interaction")
-        both = [r.chunk for r in retrieved
+        both = [r for r in retrieved
                 if _mentions(f"{r.chunk.title} {r.chunk.text}", a)
                 and _mentions(f"{r.chunk.title} {r.chunk.text}", b)]
+        candidates = {r.chunk_id: r for r in both}
+        for c in label_chunks:
+            candidates.setdefault(c.chunk_id, RetrievalResult(c, 0.0))
+            candidates[c.chunk_id].components["label_scan"] = 1.0
 
-        unique = list({c.chunk_id: c for c in label_chunks + both}.values())
+        unique = list(candidates.values())
         if not unique:
             return InteractionReport(a, b, Answer(
                 question, no_evidence_message(a, b), found=False, confidence="None",
                 confidence_reason="No chunk in the corpus mentions both drugs; "
                                   "the LLM was not called."), findings)
 
-        evidence = rerank(question, [RetrievalResult(c, 0.0) for c in unique],
-                          top_k=MAX_EVIDENCE)
+        evidence = rerank(question, unique, top_k=MAX_EVIDENCE)
         # The mention rule already decided relevance, so no score threshold here.
         ans = generate_answer(question, evidence, self.provider,
                               apply_threshold=False,

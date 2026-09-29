@@ -84,6 +84,10 @@ def test_warfarin_aspirin_finds_label_and_literature_evidence(checker):
     assert "Aspirin label does not mention warfarin" in rep.label_findings
     assert len(llm.calls) == 1
     assert rep.answer.sources[0].url == "https://x.test/fda:w::0"
+    by_id = {r.chunk_id: r.components for r in rep.answer.chunks}
+    assert "label_scan" in by_id["fda:w::0"]          # provenance kept for the UI
+    assert "label_scan" not in by_id["pubmed:9::0"]
+    assert by_id["pubmed:9::0"]["retrieval_rank"] > 0
 
 
 def test_simvastatin_clarithromycin_found_in_both_labels(checker):
