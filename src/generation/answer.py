@@ -41,9 +41,11 @@ knowledge, even if you are confident.
 3. If the passages do not contain the answer, reply with exactly {NOT_FOUND_SENTINEL} \
 and nothing else.
 4. Do not diagnose, do not recommend or adjust doses for a specific person, and do \
-not tell anyone to start, stop or combine medications. If the question asks for \
-that, say you cannot give personal medical advice, then summarise what the sources \
-say in general terms and suggest consulting a healthcare professional.
+not tell anyone to start, stop or combine medications. Only if the question asks \
+for that kind of personal advice, say you cannot give it, then summarise what the \
+sources say in general terms and suggest consulting a healthcare professional. \
+General questions about a drug's effects, side effects or interactions are not \
+personal advice: answer them directly without a disclaimer.
 5. Never state that a drug or drug combination is "safe". If the passages do not \
 describe an interaction, say that no interaction evidence was found in the \
 provided sources.
@@ -93,8 +95,9 @@ def confidence(results: list[RetrievalResult]) -> tuple[str, str]:
                      if r.score >= top - config.CONFIDENCE_SPREAD}
     n = len(agreeing_docs)
     strong = top >= config.HIGH_SCORE
-    why = (f"best reranker score {top:.1f} "
-           f"({'strong' if strong else 'moderate'}); "
+    band = ("strong" if strong else
+            "moderate" if top > config.NOT_FOUND_THRESHOLD else "weak")
+    why = (f"best reranker score {top:.1f} ({band}); "
            f"{n} distinct source document(s) score within "
            f"{config.CONFIDENCE_SPREAD:g} of it")
     if strong and n >= 2:
@@ -130,7 +133,9 @@ def generate_answer(question: str, results: list[RetrievalResult],
                for i, r in enumerate(results, start=1)]
     level, why = confidence(results)
 
-    cited = {int(n) for n in re.findall(r"\[(\d+)\]", text)}
+    # Accept [1], [1][2] and [1, 2] -- models use all three.
+    cited = {int(n) for group in re.findall(r"\[([\d,\s]+)\]", text)
+             for n in re.findall(r"\d+", group)}
     if not cited & set(range(1, len(results) + 1)):
         # Grounding check: an answer that cites nothing is not trusted.
         level, why = "Low", why + "; the answer contains no citations"

@@ -96,6 +96,12 @@ def test_uncited_answer_is_downgraded_to_low_confidence():
     assert "no citations" in ans.confidence_reason
 
 
+def test_comma_separated_citations_count_as_cited():
+    results = renumber([_r("a", HIGH + 2, "d1"), _r("b", HIGH + 1, "d2")])
+    ans = generate_answer("q", results, FakeProvider("Rhabdomyolysis [1, 2]."))
+    assert ans.confidence == "High"
+
+
 def test_confidence_high_needs_strong_score_and_two_agreeing_documents():
     assert confidence([_r("a", HIGH + 1, "d1"), _r("b", HIGH, "d2")])[0] == "High"
 
