@@ -19,8 +19,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Harvest the raw medical corpus.")
     ap.add_argument("--small", action="store_true",
                     help="Fetch a small subset (4 drugs, 3 queries) for a smoke test.")
-    ap.add_argument("--per-query", type=int, default=10,
-                    help="PubMed records to fetch per query (default: 10).")
+    ap.add_argument("--per-query", type=int, default=12,
+                    help="PubMed records to fetch per query (default: 12).")
     ap.add_argument("--skip-pmc", action="store_true",
                     help="Skip PMC full-text harvesting (it is the slowest step).")
     args = ap.parse_args()
