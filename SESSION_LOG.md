@@ -229,3 +229,161 @@ Phase 4 — Vector DB & Hybrid Retrieval · Phase 5 — Reranking
   explicit source list, a graceful "not found in corpus" path, and a confidence
   indicator derived from retrieval score spread and source agreement. Requires
   `GEMINI_API_KEY` to be set first.
+
+---
+
+## Session: 2026-09-29
+
+**Phase(s) worked on:** Phase 6 — Grounded Generation · Phase 7 — Drug Interaction
+Analysis (minimal) · Streamlit UI (pulled forward from Phase 10)
+
+**Goal for this session:**
+- Rebuild the gitignored `data/` directory on a new machine and confirm it matches
+  the previous session's results
+- Replace the retired Gemini model
+- Complete Phase 6 and a minimal Phase 7, and add a demo UI for the mid-term
+  evaluation (user explicitly authorised running across these phase boundaries)
+
+**What was done:**
+- **Environment:** new `.venv` on Python 3.12.10 (see decisions); all requirements
+  installed. Branch `ishaan/phase6-7-ui`.
+- **Data rebuilt:** full harvest → ingestion → chunking → `build_index --check`.
+  169 documents (20 FDA, 140 PubMed, 9 PMC), 1,188 chunks, 1,188 vectors.
+- **`src/generation/providers.py`** — `LLMProvider` protocol + `GeminiProvider`.
+  One call per question; exponential backoff (2/4/8/16 s) on 429 and 503; a clear
+  `LLMError` if retries run out or the key/model is wrong.
+- **`src/generation/answer.py`** — system prompt (answer only from the numbered
+  passages, cite every claim as [n], reply `NOT_FOUND` if the passages do not
+  answer, no diagnosis or personal dosing, never call a drug or combination
+  "safe"); `Answer` with text, numbered `Source` list (title, section, URL,
+  `Chunk.citation()`) and the chunks used; not-found short-circuit; confidence
+  indicator; CLI `python -m src.generation.answer "question"`.
+- **`src/interactions/check.py`** — drug-name normalisation against
+  `corpus_spec.DRUGS` plus corpus label aliases; FDA label scan; hybrid retrieval
+  across the corpus; rerank; generation through the Phase 6 path; CLI
+  `python -m src.interactions.check drugA drugB`.
+- **`app.py`** — Streamlit, two tabs ("Ask a Question", "Drug Interaction
+  Check"), persistent disclaimer, confidence badge, numbered linked sources, and
+  an expander showing every retrieved chunk with its section, rerank score,
+  hybrid/dense/BM25 ranks and whether the label scan found it. Models, Chroma
+  and BM25 are loaded once with `st.cache_resource`; the UI never rebuilds the index.
+- **Tests:** `tests/test_generation.py` (11) and `tests/test_interactions.py` (10,
+  5 of which run against the real `chunks.jsonl` when present and skip otherwise).
+  All use a fake LLM and a stubbed cross-encoder; none hit the network.
+- **Docs:** CLAUDE.md §3 (runtime, LLM) and §4 checkboxes; README Usage/Status.
+
+**Decisions made / deviations from plan:**
+- **LLM model → `gemini-3.5-flash-lite`.** `gemini-2.0-flash` was shut down on
+  2026-06-01. Listed the models available to the key (61, including
+  `gemini-3.5-flash-lite`), switched the default in `config.py` and
+  `.env.example`, and a test generation call succeeded.
+- **Python 3.12 instead of 3.13.** This machine has 3.11, 3.12 and 3.14, but no
+  3.13. 3.12 has wheels for the whole ML stack; 3.14 was a risk for
+  chromadb/onnxruntime. Everything installs and all tests pass on 3.12.10.
+- **Not-found threshold = 0.0 (cross-encoder logit).** Chosen from observed
+  scores. In-corpus questions (8 `--eval` probes + 4 more) had top rerank scores
+  of **+3.9 to +8.5**. Out-of-corpus questions (malaria, isotretinoin, multiple
+  sclerosis, pancreatic chemotherapy, insulin glargine, car tyres, capital of
+  France) had **−10.9 to −2.9**. 0.0 sits in that gap and is where the
+  cross-encoder rates a passage at 50% likely to be relevant. The one borderline
+  case was migraine (+0.9): the corpus has one partially relevant paper, so it
+  passes and gets a Low-confidence answer.
+- **Confidence indicator, two signals.** *Strength:* is the best rerank score
+  ≥ 5.0? That value splits the observed in-corpus top scores into broad matches
+  (3.9–4.7) and precise section matches (6.9–8.5). *Agreement:* how many distinct
+  documents have a passage scoring within 3.0 of the best one.
+  High = strong and ≥ 2 documents; Medium = either one; Low = neither.
+  Any answer with no [n] citation is forced to Low.
+- **Phase 7 evidence rule:** a chunk counts as interaction evidence only if it
+  names both drugs, or it is one drug's FDA label and names the other. Label
+  scan checks the **Drug Interactions section first, then the rest of the
+  label**. This goes beyond "Drug Interactions sections only": sertraline's label
+  names tramadol only under Warnings and Cautions, and the aspirin label is an OTC
+  label with no Drug Interactions section at all.
+- **Interaction evidence skips the score threshold.** The both-drugs mention rule
+  decides relevance, so evidence is passed to the LLM even when its rerank score
+  is low. The confidence text reports those scores honestly as "weak".
+- **Brand names: only the corpus's aliases are used.** The corpus labels are
+  generic/repackager labels, so aliases are salt/form names ("Warfarin Sodium",
+  "Tramadol Hcl Er", "Low Dose Aspirin"), not brands. "Coumadin" is reported as
+  not in the corpus. A hand-written brand table was not added.
+- **MEDICAL-SAFETY EDGE (flagged):** when no chunk names both drugs, the output
+  says "No interaction evidence was found in our corpus", followed by an explicit
+  "This does NOT mean the combination is safe", and the LLM is not called. The
+  system prompt also forbids calling any drug or combination "safe". Absence of
+  evidence in ~170 documents is not evidence of safety, and this wording must not
+  be softened.
+- **FDA source URLs → DailyMed.** `labels.fda.gov/<set_id>` returns 404;
+  `dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=<set_id>` returns the label (verified).
+
+**Bugs found and fixed (all found by running the thing):**
+1. **Corpus did not reproduce from the README.** `harvest.py` defaulted to 10
+   records per PubMed query, but the logged corpus used 12. First rebuild: 147
+   docs / 1,145 chunks. The default is now 12 → 169 docs / 1,188 chunks. The
+   remaining gap to the logged 171 / 1,255 comes from PubMed and openFDA being
+   live sources (search results and label versions change); PMC is identical
+   (9 docs, 301 chunks).
+2. **Dead FDA source links** (above) — every FDA citation link was a 404.
+3. **CLIs crashed on Unicode when stdout is a pipe on Windows** (cp1252 cannot
+   encode "≥"). `build_index --check` died on it. Fixed once in `config.py`
+   (UTF-8 stdout/stderr), since every entry point imports it.
+4. **Grounding check missed `[1, 2, 5]`-style citations**, so a well-cited answer
+   was downgraded to Low. The regex now accepts [1], [1][2] and [1, 2].
+5. **Over-applied advice refusal:** Gemini prefixed "I cannot give personal
+   medical advice" on general interaction questions. Rule 4 of the prompt now
+   applies only to personal-advice requests.
+6. **Interaction evidence panel showed "hybrid rank #0" for every passage.** The
+   candidates had been rebuilt without their retrieval metadata. Each chunk now
+   keeps its hybrid rank, and chunks the label scan found are tagged.
+
+**Verification:**
+- `python -m src.retrieval.build_index --check` — **pass**; nearest neighbours
+  sensible and matching the last session's pattern (including the known dense
+  metformin/metoprolol confusion that hybrid + rerank fixes).
+- `python -m src.retrieval.search --eval --rerank` — **pass, matches the log**:
+  renal query → Contraindications #1 (was hybrid #2); aspirin/warfarin → warfarin
+  Drug Interactions #1; CYP3A4/simvastatin → top 3 all simvastatin; metformin
+  side effects → Adverse Reactions above Drug Interactions.
+- `python -m pytest` — **88 passed** (the original 67 + 21 new).
+- `python -m src.generation.answer "What are the common side effects of metformin?"`
+  — **pass**: diarrhoea, nausea/vomiting, flatulence etc., cited to the FDA
+  label's Adverse Reactions section; Medium confidence (top score 4.4, 3 documents).
+- `python -m src.generation.answer "What is the treatment for malaria?"` — **pass**:
+  not-found message, LLM not called.
+- Extra Q&A checks — kidney contraindications of metformin (High, 6.1),
+  serotonin syndrome features (High, 9.0), community-acquired pneumonia treatment
+  (High, 7.5): all well cited.
+- `python -m src.interactions.check` — **pass** for warfarin+aspirin (warfarin
+  label Drug Interactions + literature), simvastatin+clarithromycin (both labels,
+  contraindicated, CYP3A mechanism), sertraline+tramadol (sertraline label
+  Warnings, serotonin syndrome); amoxicillin+gabapentin → "No interaction
+  evidence was found in our corpus…"; warfarin+coumadin → "Not in our corpus: coumadin".
+- `streamlit run app.py` — server started and `/_stcore/health` returned ok.
+  Both tabs were then driven with Streamlit's `AppTest` harness, which runs
+  `app.py` with real inputs. This covered the metformin and malaria questions and
+  the warfarin+aspirin, simvastatin+clarithromycin, amoxicillin+gabapentin and
+  warfarin+coumadin pairs. Disclaimer, answer, badge, linked sources and evidence
+  expander all rendered, with no exceptions. No human looked at the page in a
+  browser this session.
+
+**Open issues / blockers:**
+- **Safety observation (Phase 9):** "I have chest pain, what should I take?"
+  scored below threshold, so it got the generic not-found message rather than an
+  explicit "I can't give personal medical advice — seek care". Safe, but not
+  ideal wording for an urgent symptom. Revisit in Phase 9's adversarial checks.
+- Interaction confidence reflects rerank scores, which are modest for label
+  chunks (warfarin+aspirin shows Medium; sertraline+tramadol shows Low, because
+  only one document names both drugs). This is explainable but conservative.
+- Some retrieval passages are loosely relevant, e.g. an olanzapine/metformin
+  paper appears as a metformin side-effect source. They pass the threshold; the
+  LLM mostly ignores them.
+- `harvest.py` aborts the whole run on one failed batch (seen once on a PMC
+  fetch in a re-run) instead of skipping it.
+- The embedding build took 21 min this time (0.9 chunks/s), because it ran at the
+  same time as a pip install. Do not rebuild the index close to the demo.
+- The aspirin FDA label is an OTC label with no Drug Interactions section.
+
+**Next session should start with:**
+- Open `streamlit run app.py` in a browser and rehearse the demo questions, then
+  start Phase 8 (pick the first advanced feature with the user) or Phase 9
+  evaluation.

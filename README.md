@@ -33,9 +33,10 @@ Grounded Medical Response + Sources + Evidence
 git clone https://github.com/manan75/Medical_literature_RAG-.git
 cd Medical_literature_RAG-
 
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # macOS / Linux
+python -m venv .venv             # Python 3.12 or 3.13
+.venv\Scripts\activate           # Windows (cmd / PowerShell)
+# source .venv/Scripts/activate  # Windows Git Bash
+# source .venv/bin/activate      # macOS / Linux
 
 pip install -r requirements.txt
 
@@ -61,16 +62,25 @@ python -m src.ingestion.pipeline
 # 3. Chunk into retrieval units → data/chunks/chunks.jsonl
 python -m src.chunking.pipeline
 
-# 4. Embed every chunk and load Chroma (~7 min on CPU for ~1300 chunks)
+# 4. Embed every chunk and load Chroma (~5-20 min on CPU for ~1200 chunks)
 python -m src.retrieval.build_index --check
 
 # 5. Query it
 python -m src.retrieval.search "What are the common side effects of metformin?"
 python -m src.retrieval.search "metformin contraindications" --compare   # dense vs BM25 vs hybrid
 python -m src.retrieval.search "warfarin aspirin interaction" --rerank   # before vs after reranking
-python -m src.retrieval.search --eval                                    # fixed probe set
+python -m src.retrieval.search --eval --rerank                           # fixed probe set
 
-# Tests
+# 6. Grounded answers with citations (needs GEMINI_API_KEY)
+python -m src.generation.answer "What are the common side effects of metformin?"
+
+# 7. Drug interaction evidence check (needs GEMINI_API_KEY)
+python -m src.interactions.check warfarin aspirin
+
+# 8. Web UI: "Ask a Question" and "Drug Interaction Check" tabs
+streamlit run app.py
+
+# Tests (offline; no key or network needed)
 python -m pytest
 ```
 
@@ -88,4 +98,17 @@ datasets are used.
 
 ## Status
 
-See the roadmap in [CLAUDE.md §4](CLAUDE.md). **Phases 0–5 complete** (ingestion → chunking → embeddings → hybrid retrieval → reranking). Phase 6 (grounded generation) is next and needs `GEMINI_API_KEY`.
+See the roadmap in [CLAUDE.md §4](CLAUDE.md). **Phases 0–7 complete** (ingestion →
+chunking → embeddings → hybrid retrieval → reranking → grounded generation →
+drug-interaction evidence), plus a Streamlit demo UI pulled forward from Phase 10.
+
+How an answer is produced: hybrid retrieval (PubMedBERT + BM25, fused with RRF) →
+cross-encoder rerank → passages scoring below 0 are dropped, and if none remain the
+system says "not found" without calling the LLM → Gemini answers only from the
+numbered passages, citing each claim. Confidence (High / Medium / Low) combines
+the best rerank score (≥ 5 is strong) with how many distinct documents score
+within 3 of it.
+
+Known limits: the corpus covers 20 drugs and ~170 documents; brand names (e.g.
+Coumadin) are not recognised unless they appear in the corpus; "no interaction
+evidence found" never means a combination is safe.
