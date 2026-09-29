@@ -8,12 +8,19 @@ so the retrieval half of the pipeline runs fully offline.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
+
+# Windows pipes default to cp1252, which crashes on medical text ("≥", "µg").
+# Every CLI imports this module, so fix it once here.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # ---- Paths ----
 DATA_DIR = ROOT / "data"
@@ -51,6 +58,13 @@ DENSE_TOP_K = 20
 SPARSE_TOP_K = 20
 RRF_K = 60                  # reciprocal-rank-fusion damping constant
 RERANK_TOP_K = 5            # chunks handed to the LLM after reranking
+
+# ---- Generation (Phase 6) ----
+# Thresholds are on the cross-encoder's raw logit scale (ms-marco MiniLM), chosen
+# from observed --eval scores; see SESSION_LOG.md 2026-09-29 for the numbers.
+NOT_FOUND_THRESHOLD = 0.0   # chunks below this are dropped; none left -> "not found"
+HIGH_SCORE = 5.0            # best chunk at/above this counts as strong evidence
+CONFIDENCE_SPREAD = 3.0     # docs scoring within this of the best one "agree"
 
 
 def ensure_dirs() -> None:
