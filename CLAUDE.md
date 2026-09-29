@@ -84,10 +84,23 @@ These rules govern how work in this repo proceeds, regardless of which phase is 
   academic use. **DrugBank was rejected** — its full interaction dataset requires a
   paid licence. Drug-interaction evidence therefore comes from the
   `drug_interactions` section of FDA labels plus PubMed literature.
+- **Plain-language disease content: MedlinePlus Health Topics** (NLM), added
+  2026-09-29 (licensing checked against medlineplus.gov that day).
+  PubMed and FDA labels are technical; lay questions ("what are the symptoms of
+  malaria?") had nothing to retrieve. Source: the daily compressed Health Topic XML
+  (`medlineplus.gov/xml.html`, ~4.7 MB zip, regenerated Tuesday–Saturday).
+  **Only the Health Topic summaries are used** — NLM lists "Summaries on health topic
+  pages" as public domain. The same XML also carries third-party link records,
+  which are not ingested. **Not used:** the A.D.A.M. Medical Encyclopedia and the
+  ASHP drug monographs on MedlinePlus, which are copyrighted and licensed to NLM
+  only. NLM asks for the credit "Source: MedlinePlus, National Library of Medicine".
+  **Mayo Clinic and Cleveland Clinic were rejected**: their terms of use prohibit
+  scraping and reuse of their content.
 - **Folder structure (actual):**
   ```
   /data/raw/pubmed/       # harvested E-utilities XML + provenance sidecars
   /data/raw/fda/          # harvested openFDA label JSON
+  /data/raw/medlineplus/  # MedlinePlus Health Topic XML zip + provenance sidecar
   /data/processed/        # documents.jsonl  (extracted, normalised)
   /data/chunks/           # chunks.jsonl     (retrieval units)
   /data/vectorstore/      # Chroma persistent store
