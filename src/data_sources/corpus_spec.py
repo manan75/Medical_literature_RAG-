@@ -52,3 +52,10 @@ PMC_QUERIES = [
     "drug drug interaction pharmacokinetics review open access[filter]",
     "hypertension guideline review open access[filter]",
 ]
+
+# MedlinePlus health topics (plain-language disease content). Every English topic is
+# kept: MedlinePlus has no single "diseases" group -- conditions are spread across
+# Infections, Blood/Heart, Brain and Nerves, etc. -- so a group filter would be
+# arbitrary. Set MEDLINEPLUS_GROUPS to a set of group names to narrow it.
+MEDLINEPLUS_LANGUAGE = "English"
+MEDLINEPLUS_GROUPS: set[str] | None = None

@@ -27,6 +27,7 @@ DATA_DIR = ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 RAW_PUBMED_DIR = RAW_DIR / "pubmed"
 RAW_FDA_DIR = RAW_DIR / "fda"
+RAW_MEDLINEPLUS_DIR = RAW_DIR / "medlineplus"
 PROCESSED_DIR = DATA_DIR / "processed"
 CHUNKS_DIR = DATA_DIR / "chunks"
 VECTORSTORE_DIR = DATA_DIR / "vectorstore"
@@ -70,6 +71,6 @@ CONFIDENCE_SPREAD = 3.0     # docs scoring within this of the best one "agree"
 def ensure_dirs() -> None:
     """Create every data directory the pipeline writes to."""
     for d in (
-        RAW_PUBMED_DIR, RAW_FDA_DIR, PROCESSED_DIR, CHUNKS_DIR, VECTORSTORE_DIR
+        RAW_PUBMED_DIR, RAW_FDA_DIR, RAW_MEDLINEPLUS_DIR, PROCESSED_DIR, CHUNKS_DIR, VECTORSTORE_DIR
     ):
         d.mkdir(parents=True, exist_ok=True)

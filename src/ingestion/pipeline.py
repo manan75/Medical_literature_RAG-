@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from src import config
-from src.ingestion import fda_parser, html_extract, pdf_extract, pubmed_parser
+from src.ingestion import (fda_parser, html_extract, medlineplus_parser,
+                           pdf_extract, pubmed_parser)
 from src.schema import Document, write_jsonl
 
 
@@ -22,6 +23,7 @@ def ingest_all(raw_dir: Path | None = None) -> list[Document]:
     handlers: list[tuple[str, callable]] = [
         ("**/*.xml", pubmed_parser.parse_file),
         ("fda/*.json", fda_parser.parse_file),
+        ("medlineplus/*.zip", medlineplus_parser.parse_file),
         ("**/*.pdf", lambda p: [d] if (d := pdf_extract.extract_pdf(p)) else []),
         ("**/*.html", lambda p: [d] if (d := html_extract.extract_html_file(p)) else []),
         ("**/*.htm", lambda p: [d] if (d := html_extract.extract_html_file(p)) else []),
