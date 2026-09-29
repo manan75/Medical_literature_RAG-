@@ -387,3 +387,155 @@ Analysis (minimal) · Streamlit UI (pulled forward from Phase 10)
 - Open `streamlit run app.py` in a browser and rehearse the demo questions, then
   start Phase 8 (pick the first advanced feature with the user) or Phase 9
   evaluation.
+
+---
+
+## Session: 2026-09-29 (part 2 — MedlinePlus)
+
+**Phase(s) worked on:** Phase 1 extension — new data source (MedlinePlus) through
+ingestion, chunking and indexing · Phase 6 check (not-found threshold) · UI
+
+**Goal for this session:**
+- Fix lay questions ("malaria can occur because of what?") that returned "not
+  found" because PubMed and FDA labels contain no plain-language disease content
+- Add MedlinePlus Health Topics without rebuilding the verified index
+- Silence the Streamlit file-watcher noise
+
+**What was done:**
+- **`.streamlit/config.toml`** — `fileWatcherType = "none"`.
+- **`src/data_sources/medlineplus.py`** — reads `medlineplus.gov/xml.html`,
+  downloads the newest dated compressed Health Topic XML to
+  `data/raw/medlineplus/mplus_topics_compressed.zip` with a `.meta.json` sidecar
+  (source URL, generation date, bytes, sha256, licence note).
+  `harvest --medlineplus-only` fetches it without re-harvesting PubMed/openFDA.
+- **`src/ingestion/medlineplus_parser.py`** — English topics → one Document each:
+  `source="medlineplus"`, title "MedlinePlus: <topic>", one "Summary" section,
+  topic URL, date created. `extra` holds the groups, "also called" names and the
+  source agency. "Also called" names are also written into the text
+  ("Also called: HBP, HTN, Hypertension."). Wired into `ingestion/pipeline.py`.
+- **`corpus_spec.py`** — `MEDLINEPLUS_LANGUAGE = "English"`,
+  `MEDLINEPLUS_GROUPS = None` (all topics).
+- **`build_index --append`** (+ `VectorStore.ids()`) — embeds only the chunks
+  whose IDs are not already in Chroma and checks that the count adds up. It warns,
+  without deleting, if indexed chunks no longer exist.
+- **Source-type tags** — `Source.source_type` (MedlinePlus / PubMed / PMC / FDA
+  label), shown as a coloured badge in the UI sources list and evidence panel,
+  and as a tag in CLI output. The UI caption carries the NLM credit line.
+- **Tests:** `tests/test_medlineplus.py` (10, synthetic XML, no network), plus
+  one append test in `test_retrieval.py` and a source-type assertion.
+- **Docs:** CLAUDE.md §3 data-source entry; README data-sources table, usage and
+  status.
+
+**Decisions made / deviations from plan:**
+- **DATA SOURCE: MedlinePlus Health Topics (NLM) added. Mayo Clinic and
+  Cleveland Clinic rejected.** Licensing was verified on
+  `medlineplus.gov/about/using/usingcontent/` on 2026-09-29 and matches the
+  brief. "Summaries on health topic pages" are public domain. The A.D.A.M.
+  Medical Encyclopedia, the ASHP drug monographs and most images are copyrighted
+  and are not ingested. NLM asks for the credit "Source: MedlinePlus, National
+  Library of Medicine", shown in the UI and README. The per-topic `<site>` link
+  records (third-party pages) are ignored. Mayo Clinic and Cleveland Clinic were
+  rejected because their terms of use prohibit scraping and reuse. This sits
+  alongside the earlier DrugBank rejection (paid licence).
+- **Source file:** `https://medlineplus.gov/xml/mplus_topics_compressed_2026-09-29.zip`,
+  4,665 KB zipped (29,433 KB XML), regenerated daily Tuesday–Saturday under a
+  dated name. The harvester therefore discovers the link instead of
+  hard-coding it, and saves under a fixed name so ingestion never sees two versions.
+- **Scope: every English topic (1,014 with a summary).** MedlinePlus has no
+  single "diseases" group; conditions are spread across Infections (126),
+  Brain and Nerves (102), Blood/Heart (93), etc. A group filter would have been
+  arbitrary, and the constant allows narrowing later.
+- **Parser in `src/ingestion/`, not `src/data_sources/`.** The brief put parsing
+  in `medlineplus.py`. The repo convention (session 1) is harvesting in
+  `data_sources/` and parsing in `ingestion/`, so parser changes never need a
+  re-download; that convention was followed.
+- **The zip is not extracted.** Ingestion globs `**/*.xml` for the PubMed parser,
+  so an extracted MedlinePlus XML would have been misread as PubMed.
+- **Summary attribution split off.** 634 summaries end in `<p class="">` naming
+  the source agency (CDC, NIH institutes…; longest 75 characters). It is stored
+  in `extra["summary_source"]`, not left in the chunk text.
+- **Incremental index, not a rebuild.** `chunks_before.jsonl` was snapshotted
+  and, after re-ingesting and re-chunking, the 1,188 existing chunks were
+  confirmed byte-identical (chunk IDs are deterministic). Only then were new
+  vectors appended.
+- **Not-found threshold stays at 0.0 (re-checked).** The gap moved and narrowed.
+  In-corpus top scores now start at +1.3 (lay "is tuberculosis contagious?"),
+  down from +3.9, because lay phrasings score lower. The out-of-corpus maximum is
+  −1.1 ("half-life of adalimumab"); others: semaglutide mechanism −1.8,
+  ivermectin dosing −2.2, isotretinoin −3.4 (now retrieves a statins topic),
+  kuru −7.7, off-topic −8.7 to −10.8. So the gap is −1.1 … +1.3. 0.0 still
+  separates it, sits near its midpoint (+0.1), and remains the cross-encoder's
+  50%-relevance point. No change, but the safety margin shrank from ~6.8 to ~2.4
+  logits (watch item for Phase 9).
+- **Confidence rule unchanged.** Single-topic lay answers score Low or Medium on
+  the "agreeing documents" signal because MedlinePlus has exactly one topic per
+  disease. That is the rule working as designed, not a bug.
+
+**Bugs found and fixed (all found by running the thing):**
+1. **140 topics would have duplicated text.** Their summaries nest lists inside
+   `<li>`/`<p>`, and `find_all(["p","ul","ol"])` visited both the outer and inner
+   blocks. Now only top-level blocks are emitted, and inner lists flatten into
+   their parent item (1,931 → 1,820 chunks; longest topic 8 → 5 chunks).
+2. **"heart attack , stroke ,"** — `get_text(" ")` adds a space at every inline
+   link boundary. Now whitespace is collapsed and spaces before punctuation are
+   removed (0 occurrences remain).
+3. **Words glued together at nested-list boundaries ("Symptomswheezing")** —
+   found by the new test after the first fix for bug 2; fixed by the same
+   join-then-clean approach.
+
+**Verification:**
+- Streamlit with `fileWatcherType = "none"` — **pass**: loaded headlessly in
+  Edge, both models loaded, log clean (0 error lines). The torchvision flood could
+  not be reproduced on a watcher-on control within the test window, so this is
+  verified clean, not verified as a before/after fix.
+- Harvest — **pass**: 4.8 MB zip + sidecar; 1,017 English topics, 1,014 with a
+  summary.
+- Ingestion → 1,183 docs (1,014 MedlinePlus). Chunking → 3,008 chunks
+  (1,820 MedlinePlus); **existing 1,188 chunks byte-identical — pass**.
+  MedlinePlus chunks per topic: 1 (615), 2 (137), 3 (144), 4 (91), 5 (27); 88%
+  in 1–3. Malaria, dengue and high blood pressure chunks spot-checked: readable
+  on their own, synonyms present.
+- `build_index --append` — **pass**: "1188 + 1820 = 3008 vectors", 748 s.
+- **6 lay questions, before → after** (before = old index + old BM25):
+  | Question | Before (top score) | After |
+  |---|---|---|
+  | malaria can occur because of what? | not found (−8.4) | answered, Low, 2.0, MedlinePlus: Malaria |
+  | what are the symptoms of malaria? | not found (−7.0) | answered, Medium, 6.6, MedlinePlus: Malaria |
+  | how does someone get dengue? | not found (−10.2) | answered, Medium, 6.4, MedlinePlus: Dengue |
+  | what is high blood pressure and why is it dangerous? | not found (−1.4) | answered, High, 7.3, 4 MedlinePlus topics |
+  | what causes diabetes? | not found (−1.8) | answered, Medium, 3.5, 4 MedlinePlus topics (type 1/2/gestational) |
+  | is tuberculosis contagious? | not found (−6.6) | answered, Low, 1.3, MedlinePlus: Tuberculosis |
+  All answers are cited and grounded only in MedlinePlus text.
+- `search --eval --rerank`, top-5 reranked diffed against the previous session —
+  **6 of 8 identical** (metformin contraindications, aspirin/warfarin,
+  CYP3A4/simvastatin, serotonin syndrome, levothyroxine, warfarin monitoring).
+  Two changed:
+  - metformin side effects: #1–4 identical; #5 FDA Drug Interactions (+2.24) →
+    olanzapine paper Conclusion (+2.74). Not MedlinePlus; the larger corpus shifted
+    BM25 IDF and the hybrid candidate pool.
+  - **"first line treatment for type 2 diabetes": mild regression.**
+    "First-line combination therapy versus first-line monotherapy" (+5.30) fell
+    out: it was hybrid candidate #20, the last slot, and MedlinePlus chunks pushed
+    it past the 20-candidate cut. #5 is now "MedlinePlus: Diabetes Medicines"
+    (+2.94). **Not changed** — reported per instructions. A candidate fix is
+    widening the rerank pool (`DENSE_TOP_K` 20 → 30).
+- UI via Streamlit `AppTest` — **pass**: blue MedlinePlus badge on the source and
+  in the evidence panel; caption shows the NLM credit.
+- `python -m pytest` — **99 passed**.
+
+**Open issues / blockers:**
+- **Decision needed:** widen the rerank candidate pool (20 → 30) to recover the
+  T2D first-line review? This costs ~50% more cross-encoder work per query.
+- The not-found margin narrowed to ~2.4 logits (−1.1 … +1.3). Phase 9 should
+  test more borderline lay and out-of-corpus questions.
+- Lay single-disease questions often get Low/Medium confidence (one topic per
+  disease). Consider counting chunk-level agreement for MedlinePlus, or accept it.
+- The MedlinePlus file changes daily. Re-harvesting later will change chunk text
+  for edited topics; `--append` then warns about stale vectors and a full rebuild
+  is required.
+- Carried over: `harvest.py` still aborts on one failed PubMed batch; brand
+  names are not recognised; the chest-pain wording observation.
+
+**Next session should start with:**
+- Decide on the candidate-pool change, then rehearse the demo in a browser
+  (`streamlit run app.py`) with the lay and technical demo questions.
