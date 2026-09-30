@@ -4,33 +4,43 @@
 
 Loads the models, Chroma store and BM25 index once per process (st.cache_resource)
 and never rebuilds the index; run `python -m src.retrieval.build_index` for that.
+Markup lives in src/api/ui_render.py, styling in assets/app.css and the theme in
+.streamlit/config.toml.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 from src import config
+from src.api import ui_render as ui
 from src.data_sources.corpus_spec import DRUGS
-from src.generation.answer import SOURCE_TYPES, Answer, answer_question
+from src.generation.answer import Answer, answer_question
 from src.generation.providers import GeminiProvider, LLMError
 from src.interactions.check import InteractionChecker
 
-st.set_page_config(page_title="Medical Literature RAG", page_icon="⚕️", layout="wide")
+st.set_page_config(page_title="Medical Literature RAG", page_icon="⚕️",
+                   layout="wide", initial_sidebar_state="auto")
+st.html(f"<style>{(Path(__file__).parent / 'assets' / 'app.css').read_text(encoding='utf-8')}</style>")
 
-st.warning(
-    "**For medical information retrieval and education only.** This tool does not "
-    "diagnose, prescribe, or give medical advice. Answers are generated from the "
-    "cited sources below and can be incomplete or wrong. Always consult a "
-    "qualified healthcare professional.", icon="⚠️")
-st.title("Medical Literature RAG")
-st.caption("MedlinePlus · PubMed · PMC · FDA drug labels → hybrid retrieval "
-           "(PubMedBERT + BM25, RRF) → cross-encoder rerank → Gemini, answering only "
-           "from cited passages. Plain-language topic summaries: Source: MedlinePlus, "
-           "National Library of Medicine.")
+ASK_EXAMPLES = [
+    "What are the symptoms of malaria?",
+    "What is high blood pressure and why is it dangerous?",
+    "What are the common side effects of metformin?",
+    "When is metformin contraindicated in patients with kidney problems?",
+    "What are the clinical features of serotonin syndrome?",
+]
+DDI_EXAMPLES = {
+    "warfarin + aspirin": ("warfarin", "aspirin"),
+    "simvastatin + clarithromycin": ("simvastatin", "clarithromycin"),
+    "sertraline + tramadol": ("sertraline", "tramadol"),
+    "amoxicillin + gabapentin": ("amoxicillin", "gabapentin"),
+}
 
 
-@st.cache_resource(show_spinner="Loading embedding model, reranker and index...")
+@st.cache_resource(show_spinner="Loading PubMedBERT, the reranker and the index…")
 def load_pipeline():
     from src.embeddings import encoder
     from src.retrieval import rerank as rerank_mod
@@ -42,7 +52,7 @@ def load_pipeline():
                            "python -m src.retrieval.build_index")
     encoder.get_model()      # warm both models so the first question is not slow
     rerank_mod.get_model()
-    return retriever
+    return retriever, ui.corpus_stats(retriever.hybrid.bm25.chunks)
 
 
 @st.cache_resource(show_spinner=False)
@@ -50,96 +60,152 @@ def load_provider():
     return GeminiProvider()
 
 
-BADGE = {"High": "green", "Medium": "orange", "Low": "red", "None": "gray"}
-TYPE_COLOR = {"MedlinePlus": "blue", "PubMed": "violet", "PMC": "violet",
-              "FDA label": "green"}
+def md(html: str) -> None:
+    st.markdown(html, unsafe_allow_html=True)
 
 
-def type_tag(source_type: str) -> str:
-    return f":{TYPE_COLOR.get(source_type, 'gray')}-badge[{source_type}]"
-
-
-def _md(text: str) -> str:
-    return text.replace("$", r"\$")   # stop Streamlit reading "$5" as LaTeX
-
-
-def render(ans: Answer) -> None:
-    (st.markdown if ans.found else st.info)(_md(ans.text))
-    color = BADGE.get(ans.confidence, "gray")
-    st.markdown(f"**Confidence:** :{color}-background[{ans.confidence}]  "
-                f"<small>{ans.confidence_reason}</small>", unsafe_allow_html=True)
-
-    if ans.sources:
-        st.markdown("**Sources**")
-        st.markdown("\n".join(
-            f"{s.number}. {type_tag(s.source_type)} [{_md(s.title)}]({s.url}) — "
-            f"*{s.section}*" if s.url
-            else f"{s.number}. {type_tag(s.source_type)} {_md(s.title)} — *{s.section}*"
-            for s in ans.sources))
-
-    if ans.chunks:
-        with st.expander(f"Retrieved evidence: {len(ans.chunks)} passages "
-                         f"(how retrieval works)"):
-            st.caption(
-                "Each passage was found by dense (PubMedBERT) and/or BM25 keyword "
-                "search, fused with reciprocal rank fusion, then re-scored by a "
-                "cross-encoder. Rerank score is the cross-encoder logit (higher = "
-                f"more relevant; below {config.NOT_FOUND_THRESHOLD:g} is discarded).")
-            for i, r in enumerate(ans.chunks, start=1):
-                c = r.components
-                ranks = ", ".join(f"{k.replace('_rank', '')} #{int(c[k])}"
-                                  for k in ("dense_rank", "bm25_rank") if k in c)
-                pre = ""
-                if c.get("retrieval_rank"):
-                    pre = f" · hybrid rank #{int(c['retrieval_rank'])}"
-                if "label_scan" in c:
-                    pre += " · found by FDA label scan"
-                st.markdown(f"**[{i}] {_md(r.chunk.title)}** — *{r.chunk.section}*  \n"
-                            f"rerank score **{r.score:+.2f}**{pre}"
-                            + (f" ({ranks})" if ranks else "")
-                            + " · " + type_tag(SOURCE_TYPES.get(r.chunk.source,
-                                                                r.chunk.source)))
-                st.text(r.chunk.text.strip())
-                st.divider()
-
-
+# ---------------------------------------------------------------- load
 try:
-    retriever = load_pipeline()
+    retriever, stats = load_pipeline()
     provider = load_provider()
 except (LLMError, RuntimeError, FileNotFoundError) as e:
     st.error(str(e))
     st.stop()
 
-ask_tab, ddi_tab = st.tabs(["Ask a Question", "Drug Interaction Check"])
+total_passages = sum(s[2] for s in stats)
+
+# ---------------------------------------------------------------- masthead
+md(f'<div class="masthead"><div class="kicker"><span>Retrieval-augmented · '
+   f'Cited · For education</span><span class="mono">{total_passages:,} passages '
+   f'indexed</span></div><h1>Medical Literature <em>RAG</em></h1>'
+   f'<p class="dek">Ask about diseases, symptoms, treatments and medicines. Every '
+   f'answer is written only from retrieved passages, and every claim points back '
+   f'to its source.</p></div>')
+md('<div class="disclaimer"><span>⚠</span><span><b>Information and education '
+   'only.</b> This tool does not diagnose, prescribe or give medical advice. Answers '
+   'can be incomplete or wrong. Always consult a qualified healthcare '
+   'professional.</span></div>')
+
+# ---------------------------------------------------------------- sidebar
+with st.sidebar:
+    st.markdown("### The corpus")
+    md(ui.stats_html(stats))
+    st.markdown("### The models")
+    md(f'<div class="sidebar-note"><b>Embeddings</b> · {config.EMBEDDING_MODEL}<br>'
+       f'<b>Reranker</b> · {config.RERANKER_MODEL}<br>'
+       f'<b>Answers</b> · {config.GEMINI_MODEL}</div>')
+    st.markdown("### Sources & credit")
+    md('<div class="sidebar-note">Plain-language topic summaries: <i>Source: '
+       '<a href="https://medlineplus.gov" target="_blank">MedlinePlus</a>, National '
+       'Library of Medicine.</i><br>Drug labels via <a href="https://open.fda.gov" '
+       'target="_blank">openFDA</a>; research abstracts via PubMed / PMC (NCBI).<br><br>'
+       'Answers are generated by an LLM from the retrieved passages only. A '
+       '“not found” reply means nothing in the corpus was relevant enough; the '
+       'model is not asked to guess.</div>')
+
+
+# ---------------------------------------------------------------- result view
+def show_result(slot: str, heading: str, ans: Answer) -> None:
+    """`slot` prefixes widget keys: both tabs can hold a result at once."""
+    if not ans.found:
+        md(f'<div class="notfound"><h4>Nothing reliable found</h4>'
+           f'<p>{ui._e(ans.text)}</p><p class="why">{ui._e(ans.confidence_reason)}</p></div>')
+        return
+
+    left, right = st.columns([1.75, 1], gap="large")
+    with left:
+        with st.container(key=f"{slot}_answer_card"):
+            md(f'<div class="answer-q"><b>Q.</b> {ui._e(heading)}</div>')
+            md(ui.answer_markdown(ans))
+    with right:
+        md(ui.confidence_html(ans))
+        md(ui.references_html(ans.sources))
+
+    with st.container(key=f"{slot}_ledger_box"):
+        n = len(ans.chunks)
+        with st.expander(f"How this answer was found · {n} passage{'s' * (n != 1)} "
+                         f"reached the model"):
+            md(ui.pipeline_html())
+            md(ui.ledger_html(ans.chunks))
+
+
+def run(fn):
+    """Call fn, turning an LLM failure into a message instead of a traceback."""
+    try:
+        return fn()
+    except LLMError as e:
+        st.error(str(e))
+        return None
+
+
+# ---------------------------------------------------------------- tabs
+ask_tab, ddi_tab = st.tabs(["Ask a question", "Check a drug interaction"])
 
 with ask_tab:
-    with st.form("ask"):
-        q = st.text_input("Question",
-                          placeholder="What are the common side effects of metformin?")
-        go = st.form_submit_button("Ask", type="primary")
-    if go and q.strip():
-        with st.spinner("Retrieving and generating..."):
-            try:
-                render(answer_question(q.strip(), retriever, provider))
-            except LLMError as e:
-                st.error(str(e))
+    def _use_example():
+        if st.session_state.ask_example:
+            st.session_state.q = st.session_state.ask_example
+            st.session_state.ask_go = True
+            st.session_state.ask_example = None
+
+    # ?q=... opens straight onto an answer (shareable demo links).
+    if "q" in st.query_params and "ask_result" not in st.session_state:
+        st.session_state.q = st.query_params["q"]
+        st.session_state.ask_go = True
+
+    with st.container(key="ask_form"):
+        with st.form("ask", border=False):
+            q = st.text_input("Your question", key="q",
+                              placeholder="e.g. What are the symptoms of malaria?")
+            submitted = st.form_submit_button("Search the literature", type="primary")
+        st.pills("Or try one of these", ASK_EXAMPLES, key="ask_example",
+                 on_change=_use_example)
+
+    if (submitted or st.session_state.pop("ask_go", False)) and q.strip():
+        with st.spinner(f"Searching {total_passages:,} passages and writing a cited answer…"):
+            ans = run(lambda: answer_question(q.strip(), retriever, provider))
+        st.session_state.ask_result = (q.strip(), ans) if ans else None
+
+    if st.session_state.get("ask_result"):
+        st.write("")
+        show_result("ask", *st.session_state.ask_result)
 
 with ddi_tab:
-    st.caption(f"Covered drugs: {', '.join(DRUGS)}")
-    with st.form("ddi"):
-        col_a, col_b = st.columns(2)
-        a = col_a.text_input("Drug A", placeholder="warfarin")
-        b = col_b.text_input("Drug B", placeholder="aspirin")
-        go = st.form_submit_button("Check interaction", type="primary")
-    if go and a.strip() and b.strip():
+    def _use_pair():
+        if st.session_state.ddi_example:
+            st.session_state.drug_a, st.session_state.drug_b = \
+                DDI_EXAMPLES[st.session_state.ddi_example]
+            st.session_state.ddi_go = True
+            st.session_state.ddi_example = None
+
+    options = sorted(DRUGS)
+    with st.container(key="ddi_form"):
+        with st.form("ddi", border=False):
+            col_a, col_vs, col_b = st.columns([1, .12, 1])
+            a = col_a.selectbox("First drug", options, index=None, key="drug_a",
+                                placeholder="Choose or type a drug",
+                                accept_new_options=True)
+            col_vs.markdown('<div class="vs">with</div>', unsafe_allow_html=True)
+            b = col_b.selectbox("Second drug", options, index=None, key="drug_b",
+                                placeholder="Choose or type a drug",
+                                accept_new_options=True)
+            submitted = st.form_submit_button("Check for interaction evidence",
+                                              type="primary")
+        st.pills("Known pairs", list(DDI_EXAMPLES), key="ddi_example",
+                 on_change=_use_pair)
+        md(f'<p class="hint">Covers the {len(DRUGS)} drugs with FDA labels in the '
+           f'corpus. “No evidence found” never means a combination is safe.</p>')
+
+    if (submitted or st.session_state.pop("ddi_go", False)) and a and b:
         checker = InteractionChecker(retriever.hybrid.bm25.chunks, retriever, provider)
-        with st.spinner("Scanning FDA labels and literature..."):
-            try:
-                report = checker.check(a.strip(), b.strip())
-            except LLMError as e:
-                st.error(str(e))
-                st.stop()
+        with st.spinner("Scanning both FDA labels and the literature…"):
+            report = run(lambda: checker.check(a, b))
+        st.session_state.ddi_result = report
+
+    report = st.session_state.get("ddi_result")
+    if report:
+        st.write("")
         if report.label_findings:
-            st.markdown("**FDA label scan**\n" + "\n".join(
-                f"- {f}" for f in report.label_findings))
-        render(report.answer)
+            md(ui.label_scan_html(report.label_findings))
+        show_result("ddi", f"Can {report.drug_a} interact with {report.drug_b}?",
+                    report.answer)

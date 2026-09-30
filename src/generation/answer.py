@@ -86,6 +86,14 @@ def build_prompt(question: str, results: list[RetrievalResult]) -> str:
             + f"\n\nQuestion: {question}\n\nAnswer (with [n] citations):")
 
 
+def confidence_signals(results: list[RetrievalResult]) -> tuple[float, int]:
+    """(best rerank score, distinct documents scoring within CONFIDENCE_SPREAD of it)."""
+    top = max(r.score for r in results)
+    agreeing = {r.chunk.doc_id for r in results
+                if r.score >= top - config.CONFIDENCE_SPREAD}
+    return top, len(agreeing)
+
+
 def confidence(results: list[RetrievalResult]) -> tuple[str, str]:
     """High / Medium / Low from two explainable signals:
 
@@ -96,10 +104,7 @@ def confidence(results: list[RetrievalResult]) -> tuple[str, str]:
     """
     if not results:
         return "None", "No relevant passages were retrieved."
-    top = max(r.score for r in results)
-    agreeing_docs = {r.chunk.doc_id for r in results
-                     if r.score >= top - config.CONFIDENCE_SPREAD}
-    n = len(agreeing_docs)
+    top, n = confidence_signals(results)
     strong = top >= config.HIGH_SCORE
     band = ("strong" if strong else
             "moderate" if top > config.NOT_FOUND_THRESHOLD else "weak")
