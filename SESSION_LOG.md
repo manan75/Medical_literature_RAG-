@@ -539,3 +539,86 @@ ingestion, chunking and indexing · Phase 6 check (not-found threshold) · UI
 **Next session should start with:**
 - Decide on the candidate-pool change, then rehearse the demo in a browser
   (`streamlit run app.py`) with the lay and technical demo questions.
+
+---
+
+## Session: 2026-09-30
+
+**Phase(s) worked on:** UI polish (Phase 10 work pulled forward: the demo front end)
+
+**Goal for this session:**
+- Make the Streamlit UI polished and properly designed for the evaluation,
+  with the retrieval evidence still visible and explainable
+
+**What was done:**
+- Branch `ishaan/ui-polish` (from `ishaan/medlineplus`).
+- **Design direction "clinical journal"**, chosen with the frontend-design
+  skill: warm paper background, ink text, one deep-teal accent; Fraunces
+  (headings and answer text), Instrument Sans (UI), JetBrains Mono (scores),
+  loaded through Streamlit's native theme font support.
+- **`.streamlit/config.toml`** — `[theme]` palette and fonts (the file watcher
+  stays off).
+- **`assets/app.css`** — masthead, disclaimer, cards, confidence meter,
+  reference list, evidence ledger, label-scan cards, responsive rules for
+  ≤1000px and ≤640px, `prefers-reduced-motion`.
+- **`src/api/ui_render.py`** — pure HTML builders (citation linking, references,
+  confidence meter, ledger with score bars, pipeline strip, label-scan cards,
+  corpus stats). Every corpus and LLM string is HTML-escaped.
+- **`app.py`** rewritten as layout only:
+  - masthead with passage count; persistent disclaimer;
+  - sidebar with per-source corpus stats, models and the MedlinePlus credit;
+  - clickable example questions and known drug pairs;
+  - drug dropdowns that still accept typed names;
+  - results kept in session state;
+  - `?q=` links that open straight onto an answer.
+- **`answer.py`** — `confidence_signals()` split out of `confidence()` so the UI
+  shows exactly the numbers the rule uses (no logic change).
+- **Tests:** `tests/test_ui_render.py` (11): escaping of `<script>`/`<img onerror>`
+  in chunk text and LLM output, all three citation formats, out-of-range
+  citations left unlinked, clamped score bars, meter segments, anchors, badges,
+  label-scan states, corpus stats.
+
+**Decisions made / deviations from plan:**
+- **HTML rendering of untrusted text.** Chunk text (third-party) and model output
+  are now rendered with `unsafe_allow_html`, so everything is passed through
+  `html.escape` first, and escaping is covered by tests. Markdown syntax survives
+  escaping, so the LLM's bold and bullets still render.
+- **Markup in `src/api/`, not in `app.py`**, so the only non-trivial UI logic
+  (escaping, citation linking) is testable without Streamlit.
+- **Deploy button hidden** (irrelevant for a local demo; it collided with the masthead).
+- **Sidebar `initial_sidebar_state="auto"`** — open on desktop, collapsed on
+  phones. "expanded" covered the whole page on a 390px screen.
+- **Playwright installed in `.venv` for visual verification only** (drives the
+  installed Edge via `channel="msedge"`; no browser download). It is not in
+  `requirements.txt`, because the app does not need it.
+
+**Bugs found and fixed (found by looking at real screenshots, not by tests):**
+1. **Crash: `StreamlitDuplicateElementKey`** once both tabs held a result, since
+   both rendered a container keyed `answer_card`. Keys are now per tab
+   (`ask_` / `ddi_`); the CSS matches both.
+2. **Mojibake "â–¸"** in the ledger: `app.py` read the CSS with Windows' default
+   cp1252. Now read as UTF-8.
+3. **Sidebar overlaid the whole page on phones**, blocking interaction.
+4. Smaller layout fixes: the masthead collided with the Deploy button; "1
+   passages"; pipeline cards wrapped 5+1; redundant "MedlinePlus:" / "FDA Label:"
+   prefixes next to badges; very long PubMed titles (clamped to 3 lines with a
+   tooltip); the hint text crowded the form border; "AGREEMENT" wrapped on phones.
+
+**Verification:**
+- Real browser (Edge via Playwright) against `streamlit run app.py`, at 1400px and
+  390px: home → `?q=What are the symptoms of malaria?` → evidence ledger expanded
+  → interaction tab → "warfarin + aspirin" pill, all in one session. **Pass**, 0
+  browser console errors at both widths. Screenshots reviewed for every view,
+  plus the not-found state ("What is the capital of France?").
+- AppTest initial render — pass (no exception, both tabs, masthead).
+- `python -m pytest` — **110 passed** (99 + 11).
+
+**Open issues / blockers:**
+- Dark mode is not styled; the theme is fixed to light (`base = "light"`) and
+  the custom CSS assumes it.
+- Carried over: the candidate-pool (20 → 30) decision; the not-found margin;
+  single-topic lay answers showing Low/Medium confidence.
+
+**Next session should start with:**
+- Rehearse the demo in a browser with the new UI, then decide on the
+  candidate-pool change.

@@ -81,8 +81,9 @@ python -m src.generation.answer "What are the common side effects of metformin?"
 # 7. Drug interaction evidence check (needs GEMINI_API_KEY)
 python -m src.interactions.check warfarin aspirin
 
-# 8. Web UI: "Ask a Question" and "Drug Interaction Check" tabs
+# 8. Web UI: "Ask a question" and "Check a drug interaction" tabs
 streamlit run app.py
+#    open straight onto an answer: http://localhost:8501/?q=What+are+the+symptoms+of+malaria
 
 # Tests (offline; no key or network needed)
 python -m pytest
