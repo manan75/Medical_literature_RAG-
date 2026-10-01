@@ -2,3 +2,21 @@
 # The watcher walks every transformers submodule and floods the console with
 # torchvision import errors. The app is not edited live during a demo.
 fileWatcherType = "none"
+
+[theme]
+# "Clinical journal": warm paper, ink text, one deep-teal accent.
+# Custom CSS in assets/app.css assumes this light palette.
+base = "light"
+primaryColor = "#0F6B66"
+backgroundColor = "#F7F4EE"
+secondaryBackgroundColor = "#EDE7DB"
+textColor = "#1C2430"
+linkColor = "#0F6B66"
+borderColor = "#DCD3C3"
+baseRadius = "6px"
+font = "'Instrument Sans':https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap"
+headingFont = "Fraunces:https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap"
+
+[theme.sidebar]
+backgroundColor = "#EFE9DD"

@@ -1,130 +1,169 @@
 # AI-Powered Medical Literature Retrieval and Drug Interaction Analysis (RAG)
 
-A Retrieval-Augmented Generation system that answers questions about diseases,
-symptoms, treatments and medications by retrieving grounded evidence from trusted
-medical literature and drug-label databases — and that analyses potential
-drug–drug interactions with cited evidence.
+A retrieval-augmented generation (RAG) system that answers questions about diseases,
+symptoms, treatments and medications using only passages retrieved from trusted public
+sources, and that checks two drugs for interaction evidence. Every answer cites its
+sources and carries a confidence rating.
 
 > **Medical disclaimer.** This system is for **medical information retrieval and
 > education only**. It does not diagnose, prescribe, or provide medical advice.
-> Every clinical answer it produces carries citations to the retrieved source
-> material. Always consult a qualified healthcare professional.
+> Answers can be incomplete or wrong. "No interaction evidence found" never means a
+> combination is safe. Always consult a qualified healthcare professional.
 
 ---
 
-## Architecture
+## How it works
 
 ```
-Medical Documents (MedlinePlus · PubMed · PMC · FDA labels · PDF · HTML)
-    ↓  src/data_sources/     harvest raw files
-    ↓  src/ingestion/        extract + normalise → Documents
-    ↓  src/chunking/         section-aware chunking → Chunks
-    ↓  src/embeddings/       biomedical embeddings (PubMedBERT)
-    ↓  src/retrieval/        Chroma vector DB + BM25 → hybrid (RRF)
-    ↓  src/retrieval/        cross-encoder reranking
-    ↓  src/generation/       grounded LLM answer (Gemini)
-    ↓
-Grounded Medical Response + Sources + Evidence
+OFFLINE (build the knowledge base)
+  PubMed / PMC (NCBI E-utilities) · FDA drug labels (openFDA) · MedlinePlus health topics (NLM)
+      ↓  src/data_sources/   harvest raw files into data/raw/
+      ↓  src/ingestion/      parse XML / JSON (PDF and HTML also supported) → Documents with sections
+      ↓  src/chunking/       section-aware chunks, ~350 tokens, ~60 overlap, never crossing a section
+      ↓  src/embeddings/     NeuML/pubmedbert-base-embeddings (768-dim, runs on CPU)
+      ↓  src/retrieval/      Chroma vector store (data/vectorstore/) + BM25 index (in memory)
+
+ONLINE (answer a question)
+  question
+      ↓  dense top 20 (Chroma, cosine) + BM25 top 20
+      ↓  Reciprocal Rank Fusion (k = 60) → 20 candidates
+      ↓  cross-encoder rerank (cross-encoder/ms-marco-MiniLM-L-6-v2) → top 5
+      ↓  gate: drop passages scoring below 0.0; none left → "not found", LLM not called
+      ↓  Gemini 3.5 Flash-Lite (gemini-3.5-flash-lite), one call, answers only from numbered passages
+  answer + numbered citations + High / Medium / Low confidence + every passage used
 ```
+
+The drug interaction check normalises two drug names against the corpus, scans both FDA
+labels for mentions of the other drug, searches the literature, keeps only passages
+naming both drugs, and explains them with citations. With no evidence it says "No
+interaction evidence was found in our corpus" and does not call the LLM.
+
+## Data sources
+
+| Source | What it adds | Access | Licence | In corpus |
+|---|---|---|---|---|
+| **MedlinePlus Health Topics** (NLM) | plain-language disease summaries | daily Health Topic XML, [medlineplus.gov/xml.html](https://medlineplus.gov/xml.html) | health topic summaries are public domain. *Source: MedlinePlus, National Library of Medicine.* | 1,014 topics, 1,820 passages |
+| **FDA drug labels** | dosing, contraindications, warnings, adverse reactions, drug interactions for 20 drugs | openFDA label API | US Government public domain | 20 labels, 569 passages |
+| **PubMed** | research abstracts | NCBI E-utilities | freely available abstracts | 140 papers, 318 passages |
+| **PMC** (PubMed Central) | open-access full-text papers | NCBI E-utilities | open-access subset only | 9 papers, 301 passages |
+
+Total: 1,183 documents, 3,008 passages. What gets harvested is defined in
+`src/data_sources/corpus_spec.py`.
+
+Only MedlinePlus's own topic summaries are used. Its A.D.A.M. Medical Encyclopedia and
+ASHP drug monographs are copyrighted and are not ingested. **Rejected sources:** DrugBank
+(paid licence), Mayo Clinic and Cleveland Clinic (terms prohibit scraping and reuse).
 
 ## Setup
+
+Requires Python 3.12 or 3.13.
 
 ```bash
 git clone https://github.com/manan75/Medical_literature_RAG-.git
 cd Medical_literature_RAG-
 
-python -m venv .venv             # Python 3.12 or 3.13
-.venv\Scripts\activate           # Windows (cmd / PowerShell)
-# source .venv/Scripts/activate  # Windows Git Bash
-# source .venv/bin/activate      # macOS / Linux
+python -m venv .venv
+.venv\Scripts\activate            # Windows (cmd / PowerShell)
+# source .venv/Scripts/activate   # Windows Git Bash
+# source .venv/bin/activate       # macOS / Linux
 
 pip install -r requirements.txt
-
-cp .env.example .env            # then fill in the keys you have
+cp .env.example .env              # then add your keys
 ```
-
-**Keys.** None are required for the retrieval half of the pipeline.
 
 | Variable | Needed for | Where to get it |
 |---|---|---|
-| `GEMINI_API_KEY` | answer generation (Phase 6+) | https://aistudio.google.com/apikey — free tier |
+| `GEMINI_API_KEY` | answer generation and interaction explanations | https://aistudio.google.com/apikey (free tier) |
 | `NCBI_API_KEY` | faster PubMed harvesting (optional) | https://account.ncbi.nlm.nih.gov/settings/ |
 
-## Usage
+No key is needed for harvesting, indexing, retrieval or the tests. Model names can be
+overridden in `.env` (`GEMINI_MODEL`, `EMBEDDING_MODEL`, `RERANKER_MODEL`).
+
+## Build the data
+
+`data/` is gitignored and regenerated from the sources.
 
 ```bash
-# 1. Build the raw corpus (hits NCBI + openFDA + MedlinePlus)
-python -m src.data_sources.harvest            # add --small for a quick subset
-python -m src.data_sources.harvest --medlineplus-only   # only refresh MedlinePlus
+# 1. Download raw files (NCBI + openFDA + MedlinePlus)
+python -m src.data_sources.harvest
+python -m src.data_sources.harvest --medlineplus-only   # refresh only MedlinePlus
 
-# 2. Extract and normalise into data/processed/documents.jsonl
+# 2. Parse into data/processed/documents.jsonl
 python -m src.ingestion.pipeline
 
-# 3. Chunk into retrieval units → data/chunks/chunks.jsonl
+# 3. Chunk into data/chunks/chunks.jsonl
 python -m src.chunking.pipeline
 
-# 4. Embed every chunk and load Chroma (~15-30 min on CPU for ~3000 chunks)
+# 4. Embed and index into Chroma (full rebuild), then run sample nearest-neighbour checks
 python -m src.retrieval.build_index --check
-#    ...or, after adding a new source with existing chunks unchanged,
+
+#    Or, after adding a new source when existing chunks are unchanged,
 #    embed only the chunks not yet in the index:
 python -m src.retrieval.build_index --append
+```
 
-# 5. Query it
+Indexing runs PubMedBERT on every chunk on the CPU. Measured on a laptop: 2.4 to 4.6
+chunks per second, so a full rebuild of 3,008 chunks takes about 11 to 21 minutes.
+`--append` warns and asks for a full rebuild if indexed chunks no longer exist in
+`chunks.jsonl`. Note that PubMed and openFDA results change over time, so a fresh
+harvest produces a slightly different corpus.
+
+## Use it
+
+```bash
+# Web app: "Ask a question" and "Check a drug interaction" tabs
+streamlit run app.py
+#   open straight onto an answer: http://localhost:8501/?q=What+are+the+symptoms+of+malaria
+
+# Grounded answer with citations (needs GEMINI_API_KEY)
+python -m src.generation.answer "What are the common side effects of metformin?"
+
+# Drug interaction evidence (needs GEMINI_API_KEY)
+python -m src.interactions.check warfarin aspirin
+
+# Retrieval only, no LLM
 python -m src.retrieval.search "What are the common side effects of metformin?"
 python -m src.retrieval.search "metformin contraindications" --compare   # dense vs BM25 vs hybrid
 python -m src.retrieval.search "warfarin aspirin interaction" --rerank   # before vs after reranking
 python -m src.retrieval.search --eval --rerank                           # fixed probe set
 
-# 6. Grounded answers with citations (needs GEMINI_API_KEY)
-python -m src.generation.answer "What are the common side effects of metformin?"
-
-# 7. Drug interaction evidence check (needs GEMINI_API_KEY)
-python -m src.interactions.check warfarin aspirin
-
-# 8. Web UI: "Ask a Question" and "Drug Interaction Check" tabs
-streamlit run app.py
-
-# Tests (offline; no key or network needed)
+# Tests: 110, all offline (no network or API key)
 python -m pytest
 ```
 
-Data sources:
+The first question after starting the app loads both models (about 40 seconds on a
+laptop). After that a question takes about 9 seconds, mostly reranking and the Gemini call.
 
-| Source | What it adds | Access | Licence |
-|---|---|---|---|
-| **MedlinePlus Health Topics** (NLM) | plain-language disease summaries (1,014 English topics) — answers lay questions like "what are the symptoms of malaria?" | daily Health Topic XML, [medlineplus.gov/xml.html](https://medlineplus.gov/xml.html) | health topic summaries are public domain. *Source: MedlinePlus, National Library of Medicine.* |
-| **PubMed / PMC** | research abstracts and open-access full text | NCBI E-utilities | public domain metadata; PMC limited to the open-access subset |
-| **FDA drug labels** | dosing, contraindications, adverse reactions, drug interactions for 20 drugs | openFDA | US Government public domain |
+## Known limitations
 
-Only MedlinePlus's own topic summaries are ingested. Its A.D.A.M. Medical
-Encyclopedia and ASHP drug monographs are copyrighted, so they are excluded.
-Mayo Clinic and Cleveland Clinic were rejected because their terms prohibit
-scraping and reuse, and DrugBank because it requires a paid licence. No licensed
-or proprietary datasets are used.
+- **Small, US-centric, English-only corpus:** 20 drug labels, 149 papers and 1,014
+  MedlinePlus topics. Many questions will correctly return "not found".
+- **Brand names are not recognised** unless they appear in the corpus labels (for
+  example "Coumadin" is not). RxNorm normalisation is planned.
+- **Thin not-found margin:** answerable questions have scored from +1.3 and
+  unanswerable ones up to -1.1 against the 0.0 threshold.
+- **Confidence measures evidence, not correctness.** Correct answers backed by a
+  single source (for example one MedlinePlus page) are rated Low or Medium.
+- **Citations are checked for presence, not support.** An answer with no valid
+  citation is marked Low, but cited passages are not automatically verified against
+  each claim. Every passage is shown in the app for manual checking.
+- **Interaction evidence** must name both drugs, so class-level statements (such as
+  "NSAIDs") are not matched to a specific drug.
+- **No formal evaluation yet.** Retrieval has been checked by hand on probe questions;
+  labelled metrics are planned (Phase 9).
+- Questions and retrieved public passages are sent to the Gemini API.
 
 ## Project documentation
 
-- **[CLAUDE.md](CLAUDE.md)** — architecture, working rules, and the phased roadmap
-  with live progress checkboxes.
-- **[SESSION_LOG.md](SESSION_LOG.md)** — dated record of every working session:
-  what was built, what was decided, and what comes next.
+- **[docs/PRESENTATION_PREP.md](docs/PRESENTATION_PREP.md):** end-to-end explanation of
+  every component, worked traces, design trade-offs and a question bank.
+- **[CLAUDE.md](CLAUDE.md):** architecture, working rules and the phased roadmap.
+- **[SESSION_LOG.md](SESSION_LOG.md):** dated record of every working session.
 
 ## Status
 
-See the roadmap in [CLAUDE.md §4](CLAUDE.md). **Phases 0–7 complete** (ingestion →
-chunking → embeddings → hybrid retrieval → reranking → grounded generation →
-drug-interaction evidence), plus a Streamlit demo UI pulled forward from Phase 10.
-
-How an answer is produced: hybrid retrieval (PubMedBERT + BM25, fused with RRF) →
-cross-encoder rerank → passages scoring below 0 are dropped, and if none remain the
-system says "not found" without calling the LLM → Gemini answers only from the
-numbered passages, citing each claim. Confidence (High / Medium / Low) combines
-the best rerank score (≥ 5 is strong) with how many distinct documents score
-within 3 of it.
-
-Each source in an answer is tagged MedlinePlus, PubMed, PMC or FDA label.
-
-Known limits: the corpus covers ~1,000 MedlinePlus topics, 20 drug labels and
-~150 papers; brand names (e.g.
-Coumadin) are not recognised unless they appear in the corpus; "no interaction
-evidence found" never means a combination is safe.
+Phases 0 to 7 are complete: ingestion, chunking, embeddings, hybrid retrieval,
+reranking, grounded generation and the drug interaction module, plus MedlinePlus as a
+plain-language source and a Streamlit demo app pulled forward from Phase 10. Next:
+advanced features (Phase 8) and formal evaluation (Phase 9). See
+[CLAUDE.md section 4](CLAUDE.md).

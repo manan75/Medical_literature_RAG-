@@ -539,3 +539,180 @@ ingestion, chunking and indexing · Phase 6 check (not-found threshold) · UI
 **Next session should start with:**
 - Decide on the candidate-pool change, then rehearse the demo in a browser
   (`streamlit run app.py`) with the lay and technical demo questions.
+
+---
+
+## Session: 2026-09-30
+
+**Phase(s) worked on:** UI polish (Phase 10 work pulled forward: the demo front end)
+
+**Goal for this session:**
+- Make the Streamlit UI polished and properly designed for the evaluation,
+  with the retrieval evidence still visible and explainable
+
+**What was done:**
+- Branch `ishaan/ui-polish` (from `ishaan/medlineplus`).
+- **Design direction "clinical journal"**, chosen with the frontend-design
+  skill: warm paper background, ink text, one deep-teal accent; Fraunces
+  (headings and answer text), Instrument Sans (UI), JetBrains Mono (scores),
+  loaded through Streamlit's native theme font support.
+- **`.streamlit/config.toml`** — `[theme]` palette and fonts (the file watcher
+  stays off).
+- **`assets/app.css`** — masthead, disclaimer, cards, confidence meter,
+  reference list, evidence ledger, label-scan cards, responsive rules for
+  ≤1000px and ≤640px, `prefers-reduced-motion`.
+- **`src/api/ui_render.py`** — pure HTML builders (citation linking, references,
+  confidence meter, ledger with score bars, pipeline strip, label-scan cards,
+  corpus stats). Every corpus and LLM string is HTML-escaped.
+- **`app.py`** rewritten as layout only:
+  - masthead with passage count; persistent disclaimer;
+  - sidebar with per-source corpus stats, models and the MedlinePlus credit;
+  - clickable example questions and known drug pairs;
+  - drug dropdowns that still accept typed names;
+  - results kept in session state;
+  - `?q=` links that open straight onto an answer.
+- **`answer.py`** — `confidence_signals()` split out of `confidence()` so the UI
+  shows exactly the numbers the rule uses (no logic change).
+- **Tests:** `tests/test_ui_render.py` (11): escaping of `<script>`/`<img onerror>`
+  in chunk text and LLM output, all three citation formats, out-of-range
+  citations left unlinked, clamped score bars, meter segments, anchors, badges,
+  label-scan states, corpus stats.
+
+**Decisions made / deviations from plan:**
+- **HTML rendering of untrusted text.** Chunk text (third-party) and model output
+  are now rendered with `unsafe_allow_html`, so everything is passed through
+  `html.escape` first, and escaping is covered by tests. Markdown syntax survives
+  escaping, so the LLM's bold and bullets still render.
+- **Markup in `src/api/`, not in `app.py`**, so the only non-trivial UI logic
+  (escaping, citation linking) is testable without Streamlit.
+- **Deploy button hidden** (irrelevant for a local demo; it collided with the masthead).
+- **Sidebar `initial_sidebar_state="auto"`** — open on desktop, collapsed on
+  phones. "expanded" covered the whole page on a 390px screen.
+- **Playwright installed in `.venv` for visual verification only** (drives the
+  installed Edge via `channel="msedge"`; no browser download). It is not in
+  `requirements.txt`, because the app does not need it.
+
+**Bugs found and fixed (found by looking at real screenshots, not by tests):**
+1. **Crash: `StreamlitDuplicateElementKey`** once both tabs held a result, since
+   both rendered a container keyed `answer_card`. Keys are now per tab
+   (`ask_` / `ddi_`); the CSS matches both.
+2. **Mojibake "â–¸"** in the ledger: `app.py` read the CSS with Windows' default
+   cp1252. Now read as UTF-8.
+3. **Sidebar overlaid the whole page on phones**, blocking interaction.
+4. Smaller layout fixes: the masthead collided with the Deploy button; "1
+   passages"; pipeline cards wrapped 5+1; redundant "MedlinePlus:" / "FDA Label:"
+   prefixes next to badges; very long PubMed titles (clamped to 3 lines with a
+   tooltip); the hint text crowded the form border; "AGREEMENT" wrapped on phones.
+
+**Verification:**
+- Real browser (Edge via Playwright) against `streamlit run app.py`, at 1400px and
+  390px: home → `?q=What are the symptoms of malaria?` → evidence ledger expanded
+  → interaction tab → "warfarin + aspirin" pill, all in one session. **Pass**, 0
+  browser console errors at both widths. Screenshots reviewed for every view,
+  plus the not-found state ("What is the capital of France?").
+- AppTest initial render — pass (no exception, both tabs, masthead).
+- `python -m pytest` — **110 passed** (99 + 11).
+
+**Open issues / blockers:**
+- Dark mode is not styled; the theme is fixed to light (`base = "light"`) and
+  the custom CSS assumes it.
+- Carried over: the candidate-pool (20 → 30) decision; the not-found margin;
+  single-topic lay answers showing Low/Medium confidence.
+
+**Next session should start with:**
+- Rehearse the demo in a browser with the new UI, then decide on the
+  candidate-pool change.
+
+---
+
+## Session: 2026-10-01
+
+**Phase(s) worked on:** Documentation for the mid-term evaluation (no pipeline changes)
+
+**Goal for this session:**
+- Write `docs/PRESENTATION_PREP.md`, one study document that teaches the whole
+  system so either presenter can answer any follow-up question
+- Check the slide deck against the code and logs
+- Bring README.md up to date
+
+**What was done:**
+- **`docs/PRESENTATION_PREP.md`** (1,525 lines): quick-start pitch and 3-minute
+  script; big picture with offline and online diagrams using real module names;
+  every offline and online component in the concept / our choice / why / spoken
+  answers pattern; drug interaction module; UI; three real traces; decisions
+  table; limitations; 38-question bank with the 10 most likely marked; glossary;
+  deck consistency check; demo runbook; presenter split.
+- **README.md** rewritten for the current system: three providers and four source
+  types including MedlinePlus, pipeline with current model names, build commands
+  including `--medlineplus-only` and `--append`, CLI usage, `streamlit run app.py`,
+  110 tests, measured build times, known limitations, disclaimer.
+- No source code changed.
+
+**Decisions made / deviations from plan:**
+- **Deck location.** The brief said `docs/Medical_Literature_RAG_Project.pptx`; the file
+  was at `C:\Users\ishaa\Downloads\`. It was read from there and not copied into the
+  repository (binary, and not requested). Each slide is four image tiles; they were
+  stitched and all 20 slides read along with the speaker notes.
+- **Every system-specific number was re-verified rather than copied from memory.**
+  New measurements taken for the document (all on this laptop's CPU):
+  - PubMedBERT config: 12 layers, 12 heads, 768 dims, vocabulary 30,522, max 512
+    tokens, mean pooling, ~418 MB; base model
+    `microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext`.
+  - Cross-encoder config: 6 layers, hidden size 384, max 512, identity output
+    (raw logits), ~87 MB; derived from the L-12 model.
+  - Chroma collection: 3,008 vectors, cosine, HNSW 16 neighbours, ef_construction
+    100, ef_search 100 (defaults).
+  - rank_bm25 0.2.2 BM25Okapi defaults: k1 1.5, b 0.75, epsilon 0.25; 33 stopwords.
+  - Truncation: 14 of 3,008 chunks (0.5%) exceed 512 real tokens when embedded
+    (8 PMC, 6 FDA, mostly tables). Word x 1.3 token estimate matches the real
+    tokenizer's median ratio (1.30).
+  - Latency medians: embed + dense search 0.13 s, BM25 0.008 s, RRF 0.2 ms, rerank
+    20 candidates 3.4 s warm (8.5 s cold), Gemini 5.5 s, model loading ~41 s once.
+  - Reranking effect on the 8 probe questions: top result changed in 7 of 8; 18 of
+    40 final top-5 slots came from outside hybrid's top 5. Not a labelled precision
+    measurement.
+- **Metformin vs metoprolol tested directly** against a general model
+  (`BAAI/bge-small-en-v1.5`). Word-level cosine similarity: PubMedBERT 0.416 vs general
+  0.768 (the general model scores metformin closer to metoprolol than to its brand
+  Glucophage, 0.675). But in a retrieval test over the 569 FDA chunks for "What are
+  the common side effects of metformin?", PubMedBERT ranked the first metoprolol
+  chunk 3rd and the general model 7th. Documented honestly: the claim holds for
+  names, not for this retrieval test; hybrid search plus reranking is what removes
+  the confusion.
+- **Ran three real traces** (2 Gemini calls): "What causes diabetes?" (Medium, 3.54,
+  4 agreeing documents), warfarin + aspirin (Medium, 1.64), and "What is the half-life
+  of adalimumab?" (not found at -1.07, with a provider that fails if called).
+  Also verified the deck's kuru demo question (not found, -5.59).
+- **Build time.** The "about 21 minutes" figure was a contended run (0.9 chunks/s);
+  measured rates range from 2.4 to 4.6 chunks/s, so a full rebuild is about 11 to
+  21 minutes. README updated accordingly.
+
+**Verification:**
+- `python -m pytest`: **110 passed** (per file: retrieval 26, ingestion 19,
+  chunking 16, generation 11, ui_render 11, interactions 10, medlineplus 10, rerank 7).
+- Document checked for leftover placeholders and for em or en dashes (none).
+- **Deck mismatches found (not edited):** slide 8 metformin/metoprolol claim
+  (contradicts slide 14 and our logs); slide 16 test count 99 (now 110) with two
+  wrong per-file counts (retrieval 26 not 28, ingestion 19 not 17); slide 6 lists
+  PDF and HTML, which are not in the corpus, and routes drug pairs through the score
+  gate, which the interaction path skips; slide 15 quotes scores for a shortened
+  question; slide 11 filter order differs from code. Full table in section 11 of the
+  prep document.
+
+**Open issues / blockers:**
+- Things we cannot fully defend yet (all in the prep document's limitations):
+  - The source list shows every passage sent to the model, including uncited
+    ones (source [2] in the diabetes trace).
+  - The citation check only requires one valid citation and does not verify
+    support.
+  - `CONFIDENCE_SPREAD = 3.0` has no logged measurement behind it.
+  - The interaction path sends evidence scoring as low as -5.49 to the model.
+  - No labelled precision or recall numbers exist.
+- The no-evidence message says the corpus covers "20 FDA labels and a small set of
+  papers", which predates MedlinePlus; still accurate for interactions, but could be
+  reworded.
+- Carried over: the candidate-pool (20 to 30) decision; thin not-found margin.
+
+**Next session should start with:**
+- Apply the deck fixes from section 11 of `docs/PRESENTATION_PREP.md`, then rehearse
+  the demo using its runbook (section 12).
