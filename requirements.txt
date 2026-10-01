@@ -22,5 +22,8 @@ rank-bm25>=0.2.2
 # --- Generation ---
 google-genai>=1.0
 
+# --- UI ---
+streamlit>=1.40
+
 # --- Testing ---
 pytest>=8.3

@@ -67,6 +67,9 @@ class VectorStore:
     def count(self) -> int:
         return self.collection.count()
 
+    def ids(self) -> set[str]:
+        return set(self.collection.get(include=[])["ids"])
+
     def reset(self) -> None:
         """Drop and recreate the collection -- an index rebuild must not leave
         chunks from a previous chunking strategy lying around."""

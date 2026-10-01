@@ -1,0 +1,4 @@
+[server]
+# The watcher walks every transformers submodule and floods the console with
+# torchvision import errors. The app is not edited live during a demo.
+fileWatcherType = "none"

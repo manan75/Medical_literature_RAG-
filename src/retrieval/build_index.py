@@ -2,6 +2,7 @@
 
     python -m src.retrieval.build_index            # rebuild from chunks.jsonl
     python -m src.retrieval.build_index --check    # nearest-neighbour sanity check
+    python -m src.retrieval.build_index --append   # embed only chunks not yet indexed
 
 Rebuild is destructive by design: the collection is dropped first, so a changed
 chunking strategy can never leave stale vectors behind that still answer queries.
@@ -57,6 +58,48 @@ def build(batch_size: int = 16) -> VectorStore:
     return store
 
 
+def append(batch_size: int = 16, chunks=None,
+           store: VectorStore | None = None) -> VectorStore:
+    """Embed only chunks missing from the collection and add them.
+
+    A full rebuild re-embeds everything (5-20 min on CPU). When a new source is
+    added and the existing chunks are unchanged, only the new ones need vectors.
+    Chunk ids are deterministic ("<doc_id>::<section>::<part>"), so "missing from
+    the collection" is exactly "new". BM25 needs nothing: it is rebuilt from
+    chunks.jsonl on every load.
+    """
+    chunks = chunks if chunks is not None else load_chunks(config.CHUNKS_FILE)
+    store = store or VectorStore()
+    have = store.ids()
+    before = len(have)
+
+    stale = have - {c.chunk_id for c in chunks}
+    if stale:
+        # Not deleted automatically: stale vectors mean the chunking changed, and
+        # the safe fix is a full rebuild, not a partial patch.
+        print(f"  WARNING: {len(stale)} indexed chunk(s) no longer exist in "
+              f"chunks.jsonl -- run a full rebuild (no --append)")
+
+    new = [c for c in chunks if c.chunk_id not in have]
+    by_source: dict[str, int] = {}
+    for c in new:
+        by_source[c.source] = by_source.get(c.source, 0) + 1
+    print(f"Appending {len(new)} new chunk(s) to {before} existing vectors "
+          f"{by_source or ''}")
+    if not new:
+        return store
+
+    start = time.monotonic()
+    store.add(new, encoder.embed_chunks(new, batch_size=batch_size))
+    print(f"  embedded in {time.monotonic() - start:.1f}s")
+
+    after = store.count()
+    if after != before + len(new):
+        raise SystemExit(f"Count mismatch: {before} + {len(new)} != {after}")
+    print(f"  collection: {before} + {len(new)} = {after} vectors")
+    return store
+
+
 def check(store: VectorStore | None = None, top_k: int = 3) -> None:
     store = store or VectorStore()
     if store.count() == 0:
@@ -79,11 +122,18 @@ def main() -> None:
                     help="Run nearest-neighbour probes after building.")
     ap.add_argument("--check-only", action="store_true",
                     help="Skip the rebuild and only run the probes.")
+    ap.add_argument("--append", action="store_true",
+                    help="Keep the existing vectors; embed and add only new chunks.")
     ap.add_argument("--batch-size", type=int, default=16)
     args = ap.parse_args()
 
     config.ensure_dirs()
-    store = VectorStore() if args.check_only else build(batch_size=args.batch_size)
+    if args.check_only:
+        store = VectorStore()
+    elif args.append:
+        store = append(batch_size=args.batch_size)
+    else:
+        store = build(batch_size=args.batch_size)
     if args.check or args.check_only:
         check(store)
 

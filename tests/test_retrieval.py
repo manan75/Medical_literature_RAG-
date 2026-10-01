@@ -252,6 +252,28 @@ def test_vector_store_empty_search_is_safe(store):
     assert store.search("metformin") == []
 
 
+def test_append_embeds_only_new_chunks(store, monkeypatch):
+    from src.retrieval import build_index
+    embedded = []
+
+    def fake_embed(chunks, **kw):
+        embedded.extend(c.chunk_id for c in chunks)
+        return [[0.0, 0.0, 1.0]] * len(chunks)
+
+    monkeypatch.setattr(build_index.encoder, "embed_chunks", fake_embed)
+    old = [_chunk("a::0::0", "Metformin causes diarrhea.")]
+    store.add(old, [[1.0, 0.0, 0.0]])
+    new = [_chunk("medlineplus:1::0::0", "Malaria is caused by a parasite.")]
+
+    build_index.append(chunks=old + new, store=store)
+    assert embedded == ["medlineplus:1::0::0"]       # old chunk not re-embedded
+    assert store.count() == 2
+    assert store.ids() == {"a::0::0", "medlineplus:1::0::0"}
+
+    build_index.append(chunks=old + new, store=store)  # idempotent
+    assert store.count() == 2 and len(embedded) == 1
+
+
 def test_vector_store_reset_clears_stale_vectors(store):
     store.add([_chunk("a::0::0", "Metformin causes diarrhea.")], [[1.0, 0.0, 0.0]])
     store.reset()

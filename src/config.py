@@ -8,6 +8,7 @@ so the retrieval half of the pipeline runs fully offline.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -15,11 +16,18 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
+# Windows pipes default to cp1252, which crashes on medical text ("≥", "µg").
+# Every CLI imports this module, so fix it once here.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # ---- Paths ----
 DATA_DIR = ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 RAW_PUBMED_DIR = RAW_DIR / "pubmed"
 RAW_FDA_DIR = RAW_DIR / "fda"
+RAW_MEDLINEPLUS_DIR = RAW_DIR / "medlineplus"
 PROCESSED_DIR = DATA_DIR / "processed"
 CHUNKS_DIR = DATA_DIR / "chunks"
 VECTORSTORE_DIR = DATA_DIR / "vectorstore"
@@ -31,7 +39,7 @@ CHUNKS_FILE = CHUNKS_DIR / "chunks.jsonl"
 # ---- Models ----
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "NeuML/pubmedbert-base-embeddings")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # ---- NCBI E-utilities ----
@@ -52,10 +60,17 @@ SPARSE_TOP_K = 20
 RRF_K = 60                  # reciprocal-rank-fusion damping constant
 RERANK_TOP_K = 5            # chunks handed to the LLM after reranking
 
+# ---- Generation (Phase 6) ----
+# Thresholds are on the cross-encoder's raw logit scale (ms-marco MiniLM), chosen
+# from observed --eval scores; see SESSION_LOG.md 2026-09-29 for the numbers.
+NOT_FOUND_THRESHOLD = 0.0   # chunks below this are dropped; none left -> "not found"
+HIGH_SCORE = 5.0            # best chunk at/above this counts as strong evidence
+CONFIDENCE_SPREAD = 3.0     # docs scoring within this of the best one "agree"
+
 
 def ensure_dirs() -> None:
     """Create every data directory the pipeline writes to."""
     for d in (
-        RAW_PUBMED_DIR, RAW_FDA_DIR, PROCESSED_DIR, CHUNKS_DIR, VECTORSTORE_DIR
+        RAW_PUBMED_DIR, RAW_FDA_DIR, RAW_MEDLINEPLUS_DIR, PROCESSED_DIR, CHUNKS_DIR, VECTORSTORE_DIR
     ):
         d.mkdir(parents=True, exist_ok=True)

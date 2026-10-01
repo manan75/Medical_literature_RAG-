@@ -53,7 +53,7 @@ def parse_label(record: dict) -> Document | None:
         source="fda_label",
         title=title,
         sections=sections,
-        url=f"https://labels.fda.gov/{set_id}",
+        url=f"https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid={set_id}",
         date=_iso_date(record.get("effective_time", "")),
         drug_names=drug_names,
         extra={

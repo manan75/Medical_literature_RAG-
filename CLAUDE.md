@@ -61,7 +61,7 @@ These rules govern how work in this repo proceeds, regardless of which phase is 
 
 *(Decided in Phase 0 — 2026-09-28.)*
 
-- **Language/runtime:** Python 3.13 (verified on 3.13.1, Windows)
+- **Language/runtime:** Python 3.12–3.13 (verified on 3.13.1 and 3.12.10, Windows)
 - **Package manager:** `pip` + `venv` (`.venv/`, `requirements.txt`). Chosen over
   poetry/uv because the marking environment is a plain college machine — one less
   tool to install before the project runs.
@@ -76,17 +76,31 @@ These rules govern how work in this repo proceeds, regardless of which phase is 
   Runs on CPU. Configurable via `EMBEDDING_MODEL`.
 - **Reranker:** **`cross-encoder/ms-marco-MiniLM-L-6-v2`** (~90 MB). General-domain
   but small and fast; Phase 5 measures whether it earns its place.
-- **LLM for generation:** **Gemini** (`gemini-2.0-flash`) via `google-genai`, on the
+- **LLM for generation:** **Gemini** (`gemini-3.5-flash-lite`) via `google-genai`, on the
   free tier. Accessed behind a provider interface so it can be swapped later.
+  (`gemini-2.0-flash`, the original choice, was shut down on 2026-06-01.)
 - **Data sources:** PubMed + PMC open-access (NCBI E-utilities) and FDA drug labels
   (openFDA). Both are public domain / open access with no licensing restriction on
   academic use. **DrugBank was rejected** — its full interaction dataset requires a
   paid licence. Drug-interaction evidence therefore comes from the
   `drug_interactions` section of FDA labels plus PubMed literature.
+- **Plain-language disease content: MedlinePlus Health Topics** (NLM), added
+  2026-09-29 (licensing checked against medlineplus.gov that day).
+  PubMed and FDA labels are technical; lay questions ("what are the symptoms of
+  malaria?") had nothing to retrieve. Source: the daily compressed Health Topic XML
+  (`medlineplus.gov/xml.html`, ~4.7 MB zip, regenerated Tuesday–Saturday).
+  **Only the Health Topic summaries are used** — NLM lists "Summaries on health topic
+  pages" as public domain. The same XML also carries third-party link records,
+  which are not ingested. **Not used:** the A.D.A.M. Medical Encyclopedia and the
+  ASHP drug monographs on MedlinePlus, which are copyrighted and licensed to NLM
+  only. NLM asks for the credit "Source: MedlinePlus, National Library of Medicine".
+  **Mayo Clinic and Cleveland Clinic were rejected**: their terms of use prohibit
+  scraping and reuse of their content.
 - **Folder structure (actual):**
   ```
   /data/raw/pubmed/       # harvested E-utilities XML + provenance sidecars
   /data/raw/fda/          # harvested openFDA label JSON
+  /data/raw/medlineplus/  # MedlinePlus Health Topic XML zip + provenance sidecar
   /data/processed/        # documents.jsonl  (extracted, normalised)
   /data/chunks/           # chunks.jsonl     (retrieval units)
   /data/vectorstore/      # Chroma persistent store
@@ -170,19 +184,19 @@ Each phase has a goal, a step-by-step checklist, and an explicit "definition of 
 
 ### Phase 6 — Grounded Generation (Core RAG Loop)
 **Goal:** LLM produces answers strictly grounded in retrieved chunks, with citations.
-- [ ] Prompt design enforcing "answer only from provided context, cite sources"
-- [ ] Response assembly: answer text + explicit source list (document + section)
-- [ ] Handle "not found in corpus" gracefully instead of hallucinating
-- [ ] Add a basic confidence/evidence indicator (e.g., based on retrieval score spread or source agreement)
-- [ ] End-to-end test: ask sample questions (e.g., "common side effects of metformin") and verify grounded, cited answers
+- [x] Prompt design enforcing "answer only from provided context, cite sources"
+- [x] Response assembly: answer text + explicit source list (document + section)
+- [x] Handle "not found in corpus" gracefully instead of hallucinating
+- [x] Add a basic confidence/evidence indicator (e.g., based on retrieval score spread or source agreement)
+- [x] End-to-end test: ask sample questions (e.g., "common side effects of metformin") and verify grounded, cited answers
 **Definition of done:** the example from the project brief ("side effects of metformin") works end-to-end with correct citations.
 
 ### Phase 7 — Drug Interaction Analysis Module
 **Goal:** Given two (or more) medications, retrieve and explain interaction evidence.
-- [ ] Ingest/structure a drug-interaction data source (dedicated dataset or literature-derived)
-- [ ] Implement interaction lookup + retrieval of supporting evidence
-- [ ] Generate an explanation grounded in retrieved evidence, with citations
-- [ ] Test with known interacting pairs and known non-interacting pairs (including a "no known interaction found" path)
+- [x] Ingest/structure a drug-interaction data source (dedicated dataset or literature-derived)
+- [x] Implement interaction lookup + retrieval of supporting evidence
+- [x] Generate an explanation grounded in retrieved evidence, with citations
+- [x] Test with known interacting pairs and known non-interacting pairs (including a "no known interaction found" path)
 **Definition of done:** the "Can Drug A interact with Drug B?" example from the brief works with cited evidence.
 
 ### Phase 8 — Advanced Features (incremental, pick order with user)
